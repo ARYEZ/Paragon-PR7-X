@@ -70,8 +70,25 @@ void StereoPage::timerCallback()
     const auto correlation = processor.getStereoCorrelation();
     shownCorrelation += (correlation - shownCorrelation) * 0.3f;
     lowestCorrelation = juce::jmin (lowestCorrelation + 0.002f, correlation);   // the lowest lately, creeping back
-    repaint (scopeArea);
-    repaint (meterArea);
+    // Redraw the scope when a setting or the picture has moved (each sample
+    // as drawn, scaled to the loudest as paint does, finer than a pixel), and
+    // the meter when its reading or lowest mark has: in silence neither changes.
+    scopeWatch.begin().add (haveScope ? 1 : 0);
+    if (haveScope)
+    {
+        float peak = 1.0e-4f;
+        for (int i = 0; i < scopeSamples; ++i)
+            peak = juce::jmax (peak, std::abs (left[(size_t) i]), std::abs (right[(size_t) i]));
+        for (int i = 0; i < scopeSamples; ++i)
+            scopeWatch.add (left[(size_t) i] / peak, 0.002f).add (right[(size_t) i] / peak, 0.002f);
+    }
+    if (scopeWatch.changed())
+        repaint (scopeArea);
+    if (const juce::Point<int> meter { juce::roundToInt (shownCorrelation * 500.0f), juce::roundToInt (lowestCorrelation * 500.0f) }; meter != shownMeter)
+    {
+        shownMeter = meter;
+        repaint (meterArea);
+    }
 }
 
 void StereoPage::resized()

@@ -20,6 +20,11 @@ public:
 private:
     void timerCallback() override;
     float dbToProportion (float db) const noexcept;
+    juce::Rectangle<float> dotColumn() const;   // where the dots are
+    int litDots() const;                        // how many are lit at the reading
+
+    static constexpr float dotPitch = 6.0f;
+    int shownLitDots = -1;
 
     LevelMeterSource& source;
     float displayedDb = minDb;

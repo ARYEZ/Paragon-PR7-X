@@ -186,6 +186,13 @@ EqDisplay::EqDisplay (ParagonX1AudioProcessor& p) : bands (p)
     startTimerHz (30);
 }
 
+void SpectrumAnalyser::addTo (ChangeWatch& watch) const
+{
+    watch.add (hasSignal() ? 1 : 0);
+    for (const auto db : smoothedDb)
+        watch.add (db, 0.25f);
+}
+
 void EqDisplay::refresh()
 {
     if (showInput)
@@ -199,7 +206,20 @@ void EqDisplay::refresh()
     // A band removed elsewhere (undo, a rig, the DAW) can't stay selected.
     if (selected >= 0 && ! shown.bands[(size_t) selected].used)
         select (-1);
-    repaint();
+
+    // Redraw when a setting, the selection or hover, the spectra (in and
+    // out) or a dynamic band's live gain has moved. (Hover and drags redraw
+    // at once in their own handlers.)
+    watch.begin().add (showInput ? 1 : 0).add (showOutput ? 1 : 0)
+         .add (selected).add (hovered).add (dragging).add (hoverPoint.x).add (hoverPoint.y);
+    if (showInput)
+        input.addTo (watch);
+    if (showOutput)
+        output.addTo (watch);
+    for (const auto& reading : dynamics)
+        watch.add (reading.active ? 1 : 0).add (reading.changeDb, 0.1f);
+    if (watch.changed())
+        repaint();
 }
 
 void EqDisplay::select (int band)

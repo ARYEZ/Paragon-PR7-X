@@ -133,7 +133,13 @@ void MarsDisplay::timerCallback()
         if (onSelect)
             onSelect (selected);
     }
-    repaint();
+    // Redraw when a setting, the selected or dragged band or a band's glow
+    // has moved. (Clicks and drags redraw at once in their own handlers.)
+    watch.begin().add (selected).add (draggingCrossover).add (draggingDriveOf);
+    for (const auto drive : shownDrive)
+        watch.add (drive, 0.005f);
+    if (watch.changed())
+        repaint();
 }
 
 void MarsDisplay::paint (juce::Graphics& g)

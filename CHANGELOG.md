@@ -2,6 +2,29 @@
 
 Each version's notes appear on its GitHub Release page.
 
+## 0.22.2
+
+- **Much lighter on the computer with the window open.** With PR7-X's window open and nothing happening, it used about **85% of a processor core** just to draw itself, so a DAW's CPU meter jumped as soon as you opened it. The sound itself costs only about 2% at the defaults. The same was found and fixed in PR7-G, PR7-B and PR7-V.
+  - **What was wrong:** the six rack units each redrew themselves completely 30 times a second, screens, shadows and all, even when nothing on them had changed. Each big page (ECHELON's, DOMINION's, CONSTRICTOR's, MARS's, BINARY's, GUILLOTINE's) did the same with its display and meters, so even a page sitting in silence took 28-47%. The level meters also redrew every tick while sound played, though their LED dots had barely moved.
+  - **What changed:** everything now redraws only what changed. A setting redraws its rack unit. A moving reading redraws just that part: the LED ladder, a key's light or the unit's screen. When nothing moves, nothing is redrawn. Each page's display redraws only when what it shows has moved (the spectrum, the cuts, a band's gain, the glow, the history, the scope), and the meters only when a dot lights or goes out. The screens' soft shadows are worked out once and kept.
+  - **Measured** (whole plugin, as a share of one processor core, software drawing on Linux):
+
+    | | Before, silent | After, silent | Before, playing | After, playing |
+    |---|---|---|---|---|
+    | Main view (the six rack units) | 85% | 6% | 86% | 8% |
+    | ECHELON's page | 42% | 6% | 53% | 41% |
+    | DOMINION's page | 37% | 13% | 47% | 41% |
+    | CONSTRICTOR's page | 28% | 7% | 35% | 7% |
+    | MARS's page | 47% | 8% | 55% | 44% |
+    | BINARY's page | 35% | 5% | 42% | 36% |
+    | GUILLOTINE's page | 36% | 8% | 44% | 31% |
+    | ORACLE's page | 6% | 6% | 13% | 6% |
+
+    Each page was measured with its unit on. Part of DOMINION's figure (about 10%) and GUILLOTINE's (about 5%) is their sound processing, not the window.
+  - **Pages with a live picture still cost more while music plays** (ECHELON's spectrum, DOMINION's cuts, MARS's glow, BINARY's scope, GUILLOTINE's history): those pictures really do change 30 times a second.
+  - **Your numbers will differ:** on Windows the window draws differently, so they won't be the same as these Linux ones. The drop should be similar, since the same needless redrawing is gone.
+- **Nothing looks different.** Compared pixel by pixel with 0.22.1, the main view, the rack units at work and every page match within 2 parts in 255 (rounding you can't see).
+
 ## 0.22.1
 
 - **Every master rig is now the whole rack, as you asked:** MARS and BINARY belong in a full mastering chain, so all 32 master rigs (bank G) run all six units: ECHELON, DOMINION, CONSTRICTOR, MARS, BINARY and GUILLOTINE. No other rig uses MARS or BINARY.

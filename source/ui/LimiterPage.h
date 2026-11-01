@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/ChangeWatch.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "PluginProcessor.h"
@@ -27,6 +28,7 @@ private:
     void timerCallback() override;
 
     ParagonX1AudioProcessor& processor;
+    ChangeWatch watch { processor };   // what the display draws (see ChangeWatch.h): it redraws only when that changes
     std::vector<effects::MasterLimiter::Frame> history;   // oldest first, one per 10 ms
     std::vector<effects::MasterLimiter::Frame> incoming;
     juce::Rectangle<float> plot;
@@ -83,6 +85,7 @@ private:
     void resetReadings();
 
     ParagonX1AudioProcessor& processor;
+    ChangeWatch meterWatch { processor };   // what the meters draw (see ChangeWatch.h): they redraw only when that changes
     LimiterDisplay display;
 
     Toggle on;

@@ -61,7 +61,15 @@ void CompDisplay::refresh()
     shown = processor.getMultibandSettings();
     if (selected >= 0 && ! shown.bands[(size_t) selected].used)
         select (-1);
-    repaint();
+
+    // Redraw when a setting, the selection or hover, or a band's live gain
+    // change (to the tenth of a dB it shows) has moved. (Hover and drags
+    // redraw at once in their own handlers.)
+    watch.begin().add (selected).add (hovered).add (dragging).add ((int) grab).add ((int) hoverGrab);
+    for (int i = 0; i < mb::maxBands; ++i)
+        watch.add (processor.getMultibandReading (i).changeDb, 0.1f);
+    if (watch.changed())
+        repaint();
 }
 
 void CompDisplay::select (int band)

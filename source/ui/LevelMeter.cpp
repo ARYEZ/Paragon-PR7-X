@@ -27,11 +27,36 @@ void LevelMeter::timerCallback()
     const auto fallenDb = displayedDb - fallDbPerSecond / (float) refreshHz;
     const auto newDb = juce::jmax (peakDb, fallenDb, minDb);
 
-    if (! juce::approximatelyEqual (newDb, displayedDb))
+    if (juce::approximatelyEqual (newDb, displayedDb))
+        return;
+    displayedDb = newDb;
+
+    // Redraw only when a dot lights or goes out, and only the dots: the
+    // reading moves a little every tick while sound plays, and redrawing
+    // the scale (and the window behind it) each time cost a good share of a
+    // core for no visible change.
+    if (const auto lit = litDots(); lit != shownLitDots)
     {
-        displayedDb = newDb;
-        repaint();
+        shownLitDots = lit;
+        repaint (dotColumn().getSmallestIntegerContainer().expanded (3));
     }
+}
+
+juce::Rectangle<float> LevelMeter::dotColumn() const
+{
+    return getLocalBounds().toFloat().reduced (0.0f, 6.0f).removeFromRight (6.0f);
+}
+
+int LevelMeter::litDots() const
+{
+    // As paint lights them: a dot is lit when its top is at or under the reading.
+    const auto numDots = (int) (dotColumn().getHeight() / dotPitch);
+    const auto litProportion = dbToProportion (displayedDb);
+    auto lit = 0;
+    for (int i = 0; i < numDots; ++i)
+        if ((float) (i + 1) / (float) numDots <= litProportion + 1.0e-4f)
+            ++lit;
+    return lit;
 }
 
 void LevelMeter::paint (juce::Graphics& g)
@@ -52,7 +77,7 @@ void LevelMeter::paint (juce::Graphics& g)
                     juce::Justification::centredRight, false);
     }
 
-    const auto pitch = 6.0f;   // one dot every 6 px
+    const auto pitch = dotPitch;   // one dot every 6 px
     const auto numDots = (int) (column.getHeight() / pitch);
     const auto litProportion = dbToProportion (displayedDb);
     const auto zeroProportion = dbToProportion (0.0f);

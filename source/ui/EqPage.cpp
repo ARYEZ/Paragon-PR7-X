@@ -256,9 +256,29 @@ void EqPage::timerCallback()
         resized();
         repaint();
     }
-    repaint (topBar);
+    // The top bar's only live part is AUTO GAIN's correction, the meter's the
+    // band's reading: redraw each only when what it shows has changed (every
+    // tick, it cost a good share of a core for nothing).
+    const auto topText = autoGain.getToggleState() ? juce::String (processor.getEqAutoGainDb(), 1) : juce::String();
+    if (topText != shownTopBar)
+    {
+        shownTopBar = topText;
+        repaint (topBar);
+    }
     if (dynamicRow)
-        repaint (meterArea);
+    {
+        const auto reading = processor.getEqDynamics (band);
+        const auto settings = processor.getEqSettings();
+        const auto& b = settings.bands[(size_t) band];
+        const auto meterText = juce::String (band) + "|" + juce::String (reading.levelDb, 1) + "|" + juce::String (reading.thresholdDb, 1)
+                             + "|" + juce::String (reading.changeDb, 1) + "|" + juce::String (reading.active ? 1 : 0)
+                             + "|" + juce::String (b.dynamicRangeDb, 1) + "|" + juce::String (b.autoThreshold ? 1 : 0);
+        if (meterText != shownMeter)
+        {
+            shownMeter = meterText;
+            repaint (meterArea);
+        }
+    }
 }
 
 void EqPage::resized()
