@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/ChangeWatch.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
@@ -45,6 +46,8 @@ public:
     // The level in dB at `hz` (the average of the bins from `hz` to `toHz`).
     float levelDb (double hz, double toHz) const noexcept;
     bool hasSignal() const noexcept { return lastTotal >= 0; }
+    // Adds what's drawn of it (each bin to a quarter of a dB) to a fingerprint.
+    void addTo (ChangeWatch&) const;
 
 private:
     static constexpr int order = 12, size = 1 << order;
@@ -120,6 +123,7 @@ private:
     void paintSpectrum (juce::Graphics&, const SpectrumAnalyser&, bool filled);
 
     EqBands bands;
+    ChangeWatch watch { bands.processor };   // what the display draws (see ChangeWatch.h): it redraws only when that changes
     SpectrumAnalyser input, output;
     eq::ParametricEq::Settings shown;   // the settings drawn last
     std::array<eq::ParametricEq::DynamicReading, eq::ParametricEq::numBands> dynamics {};

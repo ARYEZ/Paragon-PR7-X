@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/ChangeWatch.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "PluginProcessor.h"
@@ -40,6 +41,7 @@ private:
     void set (const juce::String& id, float plain);
 
     ParagonX1AudioProcessor& processor;
+    ChangeWatch watch { processor };   // what the display draws (see ChangeWatch.h): it redraws only when that changes
     juce::Rectangle<float> plot;
     int selected = 0, draggingCrossover = -1, draggingDriveOf = -1;
     float dragStartDrive = 0.0f;

@@ -67,7 +67,17 @@ void DominionDisplay::refresh()
     shown = processor.getDominionSettings();
     if (selected >= 0 && ! shown.bands[(size_t) selected].used)
         select (-1);
-    repaint();
+
+    // Redraw when a setting, the selection or hover, or what it's cutting
+    // (each filter on each channel, to a tenth of a dB) has moved. (Hover
+    // and drags redraw at once in their own handlers.)
+    watch.begin().add (selected).add (hovered).add (dragging).add (hoverPoint.x).add (hoverPoint.y);
+    const auto& d = processor.getDominion();
+    for (int c = 0; c < 2; ++c)
+        for (int k = 0; k < d.getNumFilters(); ++k)
+            watch.add (d.getReductionDb (c, k), 0.1f);
+    if (watch.changed())
+        repaint();
 }
 
 void DominionDisplay::select (int band)

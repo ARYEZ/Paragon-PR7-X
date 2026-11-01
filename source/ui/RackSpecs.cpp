@@ -174,6 +174,16 @@ std::array<RackUnit::Spec, 6> makeRackSpecs (ParagonX1AudioProcessor& p, RackAct
             column (g, content.withTrimmedTop (h + h * 0.25f),
                     { "OUT " + textOf (p, eqOutput), "SCALE " + textOf (p, eqGainScale) }, h * 0.33f);
         };
+        s.readoutState = [&p]
+        {
+            // The dynamic bands' live gains (they move the curve and dots).
+            juce::String state;
+            const auto settings = p.getEqSettings();
+            for (int band = 0; band < eq::ParametricEq::numBands; ++band)
+                if (settings.bands[(size_t) band].isDynamic())
+                    state << juce::roundToInt (p.getEqDynamics (band).changeDb * 20.0f) << ",";
+            return state;
+        };
         s.footTitle = "AUTO GAIN";
         s.footText = [&p]
         {
@@ -238,6 +248,15 @@ std::array<RackUnit::Spec, 6> makeRackSpecs (ParagonX1AudioProcessor& p, RackAct
             column (g, content.withTrimmedTop (h + h * 0.25f),
                     { "DEPTH   " + textOf (p, domMode).toUpperCase() + " MODE", "CUT -" + juce::String (deepest(), 1) + " dB" }, h * 0.33f);
         };
+        s.readoutState = [&p]
+        {
+            // Each filter's cut (the graph) to a tenth of a dB, as the readout's number shows it.
+            juce::String state;
+            const auto& d = p.getDominion();
+            for (int f = 0; f < d.getNumFilters(); ++f)
+                state << juce::roundToInt (juce::jmax (d.getReductionDb (0, f), d.getReductionDb (1, f)) * 10.0f) << ",";
+            return state;
+        };
         s.footTitle = "PRESET";
         s.footText = [&p] { return p.getDominionPresetName() + (p.isDominionPresetModified() ? " *" : ""); };   // * as on its page: changed since
         s.onEdit = [actions] { actions.openPage (1); };
@@ -290,6 +309,11 @@ std::array<RackUnit::Spec, 6> makeRackSpecs (ParagonX1AudioProcessor& p, RackAct
                                   textOf (p, compCharacter).toUpperCase() + "  " + juce::String (bands) + (bands == 1 ? " BAND" : " BANDS"),
                                   juce::String ("LOOK-AHEAD ") + (valueOf (p, mbLookahead) > 0.5f ? "ON" : "OFF") },
                     content.getHeight() * 0.16f);
+        };
+        s.readoutState = [&p, reduction]
+        {
+            // The gain reduction, to a tenth of a dB as shown.
+            return juce::String (valueOf (p, compOn) > 0.5f ? juce::roundToInt (reduction() * 10.0f) : 0);
         };
         s.footTitle = "PRESET";
         s.footText = [&p] { return p.getCompPresetName() + (p.isCompPresetModified() ? " *" : ""); };
@@ -354,6 +378,14 @@ std::array<RackUnit::Spec, 6> makeRackSpecs (ParagonX1AudioProcessor& p, RackAct
                      bandOn ? valueOf (p, marsBand (b, "Drive").toRawUTF8()) : 0.0f);
             }
         };
+        s.readoutState = [&p, numBands]
+        {
+            // How hard each band is driven (its glow).
+            juce::String state;
+            for (int b = 0; b < numBands(); ++b)
+                state << juce::roundToInt (juce::jlimit (0.0f, 1.0f, p.getMarsDrive (b)) * 200.0f) << ",";
+            return state;
+        };
         s.footTitle = "PRESET";
         s.footText = [&p] { return p.getMarsPresetName() + (p.isMarsPresetModified() ? " *" : ""); };
         s.onEdit = [actions] { actions.openPage (3); };
@@ -411,6 +443,11 @@ std::array<RackUnit::Spec, 6> makeRackSpecs (ParagonX1AudioProcessor& p, RackAct
                                   "CORRELATION " + juce::String (correlation >= 0.0f ? "+" : "") + juce::String (correlation, 2),
                                   valueOf (p, stereoListenMono) > 0.5f ? "LISTENING IN MONO" : "STEREO" },
                     content.getHeight() * 0.16f);
+        };
+        s.readoutState = [&p]
+        {
+            // The correlation, to the hundredth the readout shows.
+            return juce::String (juce::roundToInt (juce::jlimit (-1.0f, 1.0f, p.getStereoCorrelation()) * 100.0f));
         };
         s.footTitle = "IMAGE";
         s.footText = [&p]
@@ -470,6 +507,19 @@ std::array<RackUnit::Spec, 6> makeRackSpecs (ParagonX1AudioProcessor& p, RackAct
             const auto reduction = on ? juce::jmax (limiter.getReductionDb (0), limiter.getReductionDb (1)) : 0.0f;
             bar (g, glass.reduced (glass.getWidth() * 0.045f, 0.0f).withTop (glass.getBottom() - glass.getHeight() * 0.18f).withHeight (glass.getHeight() * 0.06f),
                  reduction / 12.0f);
+        };
+        s.readoutState = [&p, heldPeak]
+        {
+            // The true peak as the readout will hold it, the integrated
+            // loudness and the reduction bar, each as finely as it's drawn.
+            auto& limiter = p.getLimiter();
+            const auto on = valueOf (p, limitOn) > 0.5f;
+            const auto peak = on ? limiter.getOutputTruePeakDb() : -100.0f;
+            const auto expired = juce::Time::getMillisecondCounterHiRes() - heldPeak->second > 2000.0;
+            const auto shown = peak >= heldPeak->first || expired ? peak : heldPeak->first;
+            const auto reduction = on ? juce::jmax (limiter.getReductionDb (0), limiter.getReductionDb (1)) : 0.0f;
+            return juce::String (juce::roundToInt (shown * 10.0f)) + "," + juce::String (juce::roundToInt (limiter.getLoudness().getIntegrated() * 10.0f))
+                   + "," + juce::String (juce::roundToInt (reduction * 10.0f));
         };
         s.footTitle = "PRESET";   // its style is on the screen (STYLE here until 0.19.0)
         s.footText = [&p] { return p.getLimiterPresetName() + (p.isLimiterPresetModified() ? " *" : ""); };

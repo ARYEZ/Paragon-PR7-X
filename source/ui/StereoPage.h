@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/ChangeWatch.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "PluginProcessor.h"
@@ -38,6 +39,8 @@ private:
     void timerCallback() override;
 
     ParagonX1AudioProcessor& processor;
+    ChangeWatch scopeWatch { processor };   // what the scope draws (see ChangeWatch.h): it redraws only when that changes
+    juce::Point<int> shownMeter { -1000, -1000 };   // the correlation meter's reading and lowest mark, as drawn
     Toggle on, monoOn, widthOn, listenMono;
     Knob monoFrequency, width;
     juce::TextButton back { "BACK TO PEDAL" };

@@ -4,7 +4,8 @@
 #include "LedDisplay.h"
 #include "ParagonLookAndFeel.h"
 
-RackUnit::RackUnit (juce::AudioProcessorValueTreeState& parameters, Spec s) : state (parameters), spec (std::move (s))
+RackUnit::RackUnit (juce::AudioProcessorValueTreeState& parameters, Spec s)
+    : state (parameters), spec (std::move (s)), settings (parameters.processor)
 {
     setTitle (spec.name + " rack unit");
 
@@ -70,14 +71,85 @@ void RackUnit::mouseUp (const juce::MouseEvent& e)
         spec.onEdit();
 }
 
-void RackUnit::timerCallback()
+int RackUnit::ladderLit() const
+{
+    auto bits = 0;
+    for (size_t i = 0; i < spec.ladderMarks.size(); ++i)
+        if (ladderHeld >= spec.ladderMarks[i])
+            bits |= 1 << (int) i;
+    return bits;
+}
+
+// The parts a reading moves, as paint draws them (the screen with its shadow).
+namespace
+{
+    // A lit neon bar's glow reaches 1.6 x its height to the sides and 1.3 x
+    // above and below (ParagonLookAndFeel::drawNeonBar): the area to redraw
+    // when one lights or goes out.
+    juce::Rectangle<int> withGlow (juce::Rectangle<float> bars, float barHeight)
+    {
+        return bars.expanded (barHeight * 1.6f + 1.0f, barHeight * 1.3f + 1.0f).getSmallestIntegerContainer();
+    }
+}
+
+juce::Rectangle<int> RackUnit::ladderArea() const { return withGlow (at (418.0f, 34.0f, 18.0f, 75.0f), at (0.0f, 0.0f, 0.0f, 7.0f).getHeight()); }
+juce::Rectangle<int> RackUnit::keyLedArea() const { return withGlow (at (883.0f, 38.0f, 144.0f, 7.0f), at (0.0f, 0.0f, 0.0f, 7.0f).getHeight()); }
+juce::Rectangle<int> RackUnit::screenArea() const { return at (476.0f, 12.0f, 380.0f, 108.0f).getSmallestIntegerContainer().expanded (14); }
+
+RackUnit::Redraw RackUnit::checkRedraw()
 {
     // The ladder holds a peak and falls back about 15 dB a second, as a meter's lights do.
     if (spec.ladderReading)
         ladderHeld = juce::jmax (spec.ladderReading(), ladderHeld - 0.5f);
     for (size_t i = 0; i < keys.size(); ++i)
         keyLit[i] = spec.keys[i].isOn && spec.keys[i].isOn();
+    const auto ladder = ladderLit();
+    const auto readout = spec.readoutState ? spec.readoutState() : juce::String();
+
+    // A setting changed: the whole unit (its knobs' values, screens, everything).
+    // The small screen's text (a preset's name and *) lives outside the parameters.
+    if (settings.begin().add (spec.footText ? spec.footText() : juce::String()).changed())
+    {
+        shownLadder = ladder;
+        shownKeys = keyLit;
+        shownReadout = readout;
+        return Redraw::whole;
+    }
+    // Otherwise only what moved: the ladder, the keys' LEDs, the screen's
+    // reading (always, if the unit can't say what its screen shows).
+    auto any = false;
+    if (ladder != shownLadder)
+    {
+        shownLadder = ladder;
+        repaint (ladderArea());
+        any = true;
+    }
+    if (keyLit != shownKeys)
+    {
+        shownKeys = keyLit;
+        repaint (keyLedArea());
+        any = true;
+    }
+    if (! spec.readoutState || readout != shownReadout)
+    {
+        shownReadout = readout;
+        repaint (screenArea());
+        any = true;
+    }
+    return any ? Redraw::parts : Redraw::nothing;
+}
+
+void RackUnit::refresh()
+{
+    checkRedraw();
     repaint();
+}
+
+void RackUnit::timerCallback()
+{
+    // Kept up to date even behind a page (a hidden unit's redraws cost nothing).
+    if (checkRedraw() == Redraw::whole)
+        repaint();
 }
 
 void RackUnit::paint (juce::Graphics& g)

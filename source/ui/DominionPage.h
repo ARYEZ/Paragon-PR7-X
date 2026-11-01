@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/ChangeWatch.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "PluginProcessor.h"
@@ -60,6 +61,7 @@ private:
     juce::RangedAudioParameter& parameter (int band, const char* what) const;
 
     ParagonX1AudioProcessor& processor;
+    ChangeWatch watch { processor };   // what the display draws (see ChangeWatch.h): it redraws only when that changes
     dominion::Settings shown;
     juce::Rectangle<float> plot;
     int selected = -1, hovered = -1, dragging = -1;

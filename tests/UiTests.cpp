@@ -1,3 +1,9 @@
+#include <atomic>
+#if defined (__linux__)
+ #include <dlfcn.h>
+#endif
+#include <ctime>
+#include <thread>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -11,6 +17,8 @@
 #include "ui/MarsPage.h"
 #include "ui/StereoPage.h"
 #include "ui/SignalChain.h"
+#include "ui/RackUnit.h"
+#include "ui/LedDisplay.h"
 
 using Catch::Matchers::WithinAbs;
 
@@ -528,4 +536,227 @@ TEST_CASE ("MARS's page: picking a band moves its controls to that band", "[ui][
     // The display: its frequency scale goes both ways.
     auto& display = page.getDisplay();
     CHECK_THAT (display.frequencyAt (display.xFor (1000.0f)), Catch::Matchers::WithinRel (1000.0, 0.01));
+}
+
+// Hidden (run with "[uicpu]"): how much of one core the open window takes,
+// on a screen (xvfb -s "-screen 0 1920x1080x24"), with audio running.
+// PARAGON_UICPU_RACK=n opens rack unit n's page (0 ECHELON ... 5 BINARY) by
+// its EDIT; PARAGON_UICPU_ORACLE=1 ORACLE's page; PARAGON_UICPU_PARAMS=id=value,...;
+// PARAGON_UICPU_NOISE=1 plays noise (meters moving) instead of silence.
+TEST_CASE ("CPU of the open window", "[.][uicpu]")
+{
+    ParagonX1AudioProcessor processor;
+    processor.setPlayConfigDetails (2, 2, 48000.0, 256);
+    processor.prepareToPlay (48000.0, 256);
+    // PARAGON_UICPU_NOWINDOW=1: the sound alone (no window), to tell the two apart.
+    const auto noWindow = juce::SystemStats::getEnvironmentVariable ("PARAGON_UICPU_NOWINDOW", {}) == "1";
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+    if (noWindow) editor.reset();
+#if defined (__linux__)
+    if (auto* x11 = dlopen ("libX11.so.6", RTLD_NOW))
+        if (auto* setHandler = (void* (*) (int (*) (void*, void*))) dlsym (x11, "XSetErrorHandler"))
+            setHandler ([] (void*, void*) { return 0; });
+#endif
+    if (editor != nullptr)
+    {
+        editor->addToDesktop (0);
+        editor->setVisible (true);
+    }
+    if (const auto rack = juce::SystemStats::getEnvironmentVariable ("PARAGON_UICPU_RACK", {}); editor != nullptr && rack.isNotEmpty())
+    {
+        std::vector<RackUnit*> racks;
+        findAll (*editor, racks);
+        REQUIRE (racks.size() > (size_t) rack.getIntValue());
+        racks[(size_t) rack.getIntValue()]->getEdit().onClick();
+    }
+    if (editor != nullptr && juce::SystemStats::getEnvironmentVariable ("PARAGON_UICPU_ORACLE", {}) == "1")
+    {
+        std::function<juce::Component* (juce::Component&)> byId = [&] (juce::Component& c) -> juce::Component*
+        {
+            if (c.getComponentID() == "oracleKey") return &c;
+            for (auto* child : c.getChildren()) if (auto* f = byId (*child)) return f;
+            return nullptr;
+        };
+        if (auto* key = dynamic_cast<juce::Button*> (byId (*editor)))
+            key->onClick();
+    }
+    for (const auto& pair : juce::StringArray::fromTokens (juce::SystemStats::getEnvironmentVariable ("PARAGON_UICPU_PARAMS", {}), ",", {}))
+        set (processor, pair.upToFirstOccurrenceOf ("=", false, false).toRawUTF8(), pair.fromFirstOccurrenceOf ("=", false, false).getFloatValue());
+    const auto noise = juce::SystemStats::getEnvironmentVariable ("PARAGON_UICPU_NOISE", {}) == "1";
+
+    std::atomic<bool> running { true };
+    std::thread audio ([&]
+    {
+        juce::AudioBuffer<float> buffer (2, 256);
+        juce::MidiBuffer midi;
+        juce::Random random (3);
+        while (running)
+        {
+            buffer.clear();
+            if (noise)
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < 256; ++i)
+                        buffer.setSample (ch, i, 0.2f * (random.nextFloat() * 2.0f - 1.0f));
+            processor.processBlock (buffer, midi);
+            std::this_thread::sleep_for (std::chrono::microseconds (5333));
+        }
+    });
+
+    std::clock_t cpuStart = 0;
+    double wallStart = 0.0, cpu = 0.0, wall = 0.0;
+    // PARAGON_UICPU_SETTLE=seconds before measuring (default 2): GUILLOTINE's history fills over its first few seconds.
+    const auto settleMs = 1000 * juce::jmax (1, juce::SystemStats::getEnvironmentVariable ("PARAGON_UICPU_SETTLE", "2").getIntValue());
+    juce::Timer::callAfterDelay (settleMs, [&] { cpuStart = std::clock(); wallStart = juce::Time::getMillisecondCounterHiRes(); });
+    juce::Timer::callAfterDelay (settleMs + 10000, [&]
+    {
+        cpu = (double) (std::clock() - cpuStart) / CLOCKS_PER_SEC;
+        wall = (juce::Time::getMillisecondCounterHiRes() - wallStart) / 1000.0;
+        juce::MessageManager::getInstance()->stopDispatchLoop();
+    });
+    juce::MessageManager::getInstance()->runDispatchLoop();
+    std::printf ("window: %.1f%% of a core (whole process)\n", 100.0 * cpu / wall);
+    running = false;
+    audio.join();
+}
+
+namespace
+{
+    // Loud stereo noise through the plugin, so meters and readings move.
+    void playNoiseThrough (ParagonX1AudioProcessor& processor, int blocks, float level)
+    {
+        juce::AudioBuffer<float> buffer (2, 256);
+        juce::MidiBuffer midi;
+        juce::Random random (5);
+        for (int block = 0; block < blocks; ++block)
+        {
+            for (int ch = 0; ch < 2; ++ch)
+                for (int i = 0; i < buffer.getNumSamples(); ++i)
+                    buffer.setSample (ch, i, level * (random.nextFloat() * 2.0f - 1.0f));
+            processor.processBlock (buffer, midi);
+        }
+    }
+}
+
+TEST_CASE ("The rack units redraw only what changed: nothing while idle, their readings when they move, everything for a setting", "[ui]")
+{
+    ParagonX1AudioProcessor processor;
+    processor.setPlayConfigDetails (2, 2, 48000.0, 256);
+    processor.prepareToPlay (48000.0, 256);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+    std::vector<RackUnit*> racks;
+    findAll (*editor, racks);
+    REQUIRE (racks.size() == 6);
+
+    // Redrawing all six 30 times a second for nothing took most of a core:
+    // once drawn, an idle unit draws nothing.
+    for (auto* rack : racks)
+    {
+        CHECK (rack->checkRedraw() == RackUnit::Redraw::whole);
+        for (int tick = 0; tick < 3; ++tick)
+            CHECK (rack->checkRedraw() == RackUnit::Redraw::nothing);
+    }
+
+    // A setting: the whole unit (its knobs' values, keys, screen).
+    auto& constrictor = *racks[2];
+    REQUIRE (constrictor.getSpec().name == "CONSTRICTOR");
+    set (processor, ParamIDs::compOn, 1.0f);
+    set (processor, ParamIDs::compThreshold, -40.0f);
+    CHECK (constrictor.checkRedraw() == RackUnit::Redraw::whole);
+    CHECK (constrictor.checkRedraw() == RackUnit::Redraw::nothing);
+
+    // Loud sound: its gain reduction moves, so its ladder and screen redraw,
+    // not the whole unit.
+    playNoiseThrough (processor, 40, 0.8f);
+    CHECK (constrictor.checkRedraw() == RackUnit::Redraw::parts);
+}
+
+TEST_CASE ("A rack unit redrawn only where a reading moved matches the unit drawn whole", "[ui]")
+{
+    // The timer redraws only the ladder, the keys' LEDs and the screen when
+    // a reading moves: everything that changes must lie inside them, or the
+    // unit would keep stale pixels.
+    ParagonX1AudioProcessor processor;
+    processor.setPlayConfigDetails (2, 2, 48000.0, 256);
+    processor.prepareToPlay (48000.0, 256);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+    std::vector<RackUnit*> racks;
+    findAll (*editor, racks);
+    REQUIRE (racks.size() == 6);
+    for (const auto* id : { ParamIDs::domOn, ParamIDs::compOn, ParamIDs::marsOn, ParamIDs::stereoOn, ParamIDs::limitOn })
+        set (processor, id, 1.0f);
+    set (processor, ParamIDs::compThreshold, -40.0f);
+
+    auto checked = 0;
+    for (auto* rack : racks)
+    {
+        CAPTURE (rack->getSpec().name);
+        REQUIRE (! rack->getBounds().isEmpty());
+        // Quiet first, so the readings fall back; then loud sound moves them.
+        playNoiseThrough (processor, 400, 0.0f);
+        rack->checkRedraw();
+        rack->checkRedraw();
+        const auto draw = [rack] (juce::Image& image, juce::Rectangle<int> clip)
+        {
+            juce::Graphics g (image);
+            if (! clip.isEmpty())
+                g.reduceClipRegion (clip);
+            rack->paintEntireComponent (g, false);
+        };
+        rack->checkRedraw();
+        juce::Image before (juce::Image::ARGB, rack->getWidth(), rack->getHeight(), true);
+        draw (before, {});
+
+        // A reading moves (loud sound, then the timer's check).
+        playNoiseThrough (processor, 40, 0.8f);
+        if (rack->checkRedraw() != RackUnit::Redraw::parts)
+            continue;   // nothing moved on this one, or a setting did
+        auto patched = before.createCopy();
+        juce::RectangleList<int> parts;
+        parts.add (rack->ladderArea());
+        parts.add (rack->keyLedArea());
+        parts.add (rack->screenArea());
+        for (const auto& part : parts)
+        {
+            // The window draws what's behind the unit first; here that's nothing.
+            patched.clear (part);
+            draw (patched, part);
+        }
+        ++checked;
+        juce::Image whole (juce::Image::ARGB, rack->getWidth(), rack->getHeight(), true);
+        draw (whole, {});
+
+        int worst = 0;
+        for (int y = 0; y < whole.getHeight(); ++y)
+            for (int x = 0; x < whole.getWidth(); ++x)
+            {
+                const auto a = whole.getPixelAt (x, y), b = patched.getPixelAt (x, y);
+                worst = juce::jmax (worst, std::abs ((int) a.getRed() - (int) b.getRed()), std::abs ((int) a.getGreen() - (int) b.getGreen()));
+                worst = juce::jmax (worst, std::abs ((int) a.getBlue() - (int) b.getBlue()), std::abs ((int) a.getAlpha() - (int) b.getAlpha()));
+            }
+        CHECK (worst <= 1);   // out of 255: smoothing where a redrawn part meets its own edge, invisible
+    }
+    CHECK (checked >= 4);   // the units with a live reading: DOMINION, CONSTRICTOR, MARS, BINARY, GUILLOTINE
+}
+
+TEST_CASE ("A screen draws the same whatever colour was set before it (its kept shadow isn't faded)", "[ui]")
+{
+    // The frame's shadow is kept as a picture, and JUCE draws a picture at
+    // the current colour's opacity: a half-clear colour left by whatever was
+    // drawn before (the faceplate's INPUT meter, for one) faded it.
+    const juce::Rectangle<float> bounds (20.3f, 30.6f, 180.0f, 70.0f);
+    const auto render = [&] (juce::Colour before)
+    {
+        juce::Image image (juce::Image::ARGB, 240, 140, true);
+        juce::Graphics g (image);
+        g.fillAll (juce::Colours::white);
+        g.setColour (before);
+        LedDisplay::paintScreen (g, bounds, 1.0f);
+        return image;
+    };
+    const auto opaque = render (juce::Colours::black), faint = render (juce::Colours::orange.withAlpha (0.3f));
+    int worst = 0;
+    for (int y = 0; y < opaque.getHeight(); ++y)
+        for (int x = 0; x < opaque.getWidth(); ++x)
+            worst = juce::jmax (worst, std::abs ((int) opaque.getPixelAt (x, y).getRed() - (int) faint.getPixelAt (x, y).getRed()));
+    CHECK (worst == 0);
 }

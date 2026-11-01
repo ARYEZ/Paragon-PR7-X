@@ -67,7 +67,13 @@ void LimiterDisplay::timerCallback()
     const auto keep = (size_t) juce::jmax (1, (int) (plot.getWidth() / 2.0f) + 2);
     if (history.size() > keep)
         history.erase (history.begin(), history.end() - (std::ptrdiff_t) keep);
-    repaint();
+    // Redraw when a setting or what the history shows (each frame to a
+    // tenth of a dB) has moved: in silence it scrolls on, but stays the same.
+    watch.begin();
+    for (const auto& frame : history)
+        watch.add (frame.inputDb, 0.1f).add (frame.outputDb, 0.1f).add (frame.reductionDb, 0.1f).add (frame.momentaryLufs, 0.1f);
+    if (watch.changed())
+        repaint();
 }
 
 void LimiterDisplay::paint (juce::Graphics& g)
@@ -365,8 +371,21 @@ void LimiterPage::timerCallback()
     if (timeScaleBox.getSelectedItemIndex() != timeScale())
         timeScaleBox.setSelectedItemIndex (timeScale(), juce::dontSendNotification);
     showLegacyControls();
-    repaint (meterArea);
-    repaint (gainArea);
+
+    // Redraw the meters only when a setting or a reading moves as finely as
+    // they show it (a tenth of a dB or LU): every tick, they cost a good
+    // share of a core even in silence.
+    auto& loudness = limiter.getLoudness();
+    meterWatch.begin()
+        .add (limiter.getOutputPeakDb(), 0.1f).add (juce::jmax (limiter.getReductionDb (0), limiter.getReductionDb (1)), 0.1f)
+        .add (heldTruePeakDb, 0.1f).add (heldReductionDb, 0.1f)
+        .add (loudness.getMomentary(), 0.1f).add (loudness.getShortTerm(), 0.1f).add (loudness.getIntegrated(), 0.1f).add (loudness.getRange(), 0.1f)
+        .add (target(), 0.1f).add (timeScale());
+    if (meterWatch.changed())
+    {
+        repaint (meterArea);
+        repaint (gainArea);
+    }
 }
 
 void LimiterPage::mouseDown (const juce::MouseEvent& e)

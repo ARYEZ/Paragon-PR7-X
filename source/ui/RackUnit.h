@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "ui/ChangeWatch.h"
 #include "ui/Footswitch.h"
 
 // One of the unit's four rows since 0.18.0: a stomp drawn as a rack
@@ -41,6 +42,10 @@ public:
         std::array<juce::String, 5> ladderLabels;
         std::function<float()> ladderReading;
         std::function<void (juce::Graphics&, juce::Rectangle<float> glass)> paintReadout;
+        // What the screen shows besides settings (live readings), rounded as
+        // it draws them: the screen is redrawn only when this changes. None:
+        // redrawn every tick.
+        std::function<juce::String()> readoutState;
         juce::String footTitle;
         std::function<juce::String()> footText;
         std::function<void()> onEdit;
@@ -53,7 +58,18 @@ public:
     Footswitch& getPower() noexcept { return *power; }
     juce::TextButton& getEdit() noexcept { return edit; }
     const Spec& getSpec() const noexcept { return spec; }
-    void refresh() { timerCallback(); }
+    // Brings the meter and LEDs up to date and redraws the whole unit (after
+    // a key press; tests and screenshots call it directly).
+    void refresh();
+
+    // What the timer redraws this tick: nothing (nothing changed), parts
+    // (a meter, LED or the screen's reading) or the whole unit (a setting).
+    // Public for tests.
+    enum class Redraw { nothing, parts, whole };
+    Redraw checkRedraw();
+    // The parts a live reading redraws: the ladder, the keys' LEDs, the
+    // screen with its shadow. Public for tests.
+    juce::Rectangle<int> ladderArea() const, keyLedArea() const, screenArea() const;
 
     // Positions inside the unit, scaled from its drawn size (1332 x 132).
     static constexpr float referenceWidth = 1332.0f, referenceHeight = 132.0f;
@@ -75,4 +91,13 @@ private:
     juce::TextButton edit { "EDIT" };
     float ladderHeld = -100.0f;   // the ladder's reading, falling back slowly after a peak
     std::array<bool, 3> keyLit {};
+
+    // Redrawing only what changed (the window's CPU): the whole unit 30
+    // times a second, with its screens' shadows and the chassis behind it,
+    // took most of a core.
+    int ladderLit() const;                        // which of the ladder's bars are lit, as bits
+    ChangeWatch settings;                         // every parameter, and the small screen's text
+    int shownLadder = -1;
+    std::array<bool, 3> shownKeys {};
+    juce::String shownReadout;
 };

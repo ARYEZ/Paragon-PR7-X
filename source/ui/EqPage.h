@@ -40,6 +40,7 @@ private:
 
     ParagonX1AudioProcessor& processor;
     EqDisplay display;
+    juce::String shownTopBar { "-" }, shownMeter;   // what the top bar's AUTO GAIN reading and the meter last showed
 
     // Top bar
     juce::ToggleButton onButton { "ON" }, autoGain { "AUTO GAIN" }, showInput { "IN" }, showOutput { "OUT" };
