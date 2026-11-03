@@ -39,16 +39,6 @@ namespace effects
         a3 = g * a2;
     }
 
-    Mars::Svf::Out Mars::Svf::process (double x) noexcept
-    {
-        const auto v3 = x - s2;
-        const auto v1 = a1 * s1 + a2 * v3;
-        const auto v2 = s2 + a2 * s1 + a3 * v3;
-        s1 = 2.0 * v1 - s1;
-        s2 = 2.0 * v2 - s2;
-        return { v2, v1, x - k * v1 - v2 };
-    }
-
     void Mars::Crossover::set (double sampleRate, double hz, Slope newSlope) noexcept
     {
         slope = newSlope;
@@ -70,39 +60,6 @@ namespace effects
         for (auto& filter : low) filter.reset();
         for (auto& filter : high) filter.reset();
         onePoleState = 0.0;
-    }
-
-    std::pair<double, double> Mars::Crossover::process (double x) noexcept
-    {
-        switch (slope)
-        {
-            case Slope::db6:
-                onePoleState += onePole * (x - onePoleState);
-                return { onePoleState, x - onePoleState };
-            case Slope::db12:
-                return { low[0].process (x).low, -high[0].process (x).high };
-            case Slope::db24:
-                return { low[1].process (low[0].process (x).low).low, high[1].process (high[0].process (x).high).high };
-            case Slope::db48:
-            {
-                auto l = x, h = x;
-                for (size_t i = 0; i < low.size(); ++i)
-                {
-                    l = low[i].process (l).low;
-                    h = high[i].process (h).high;
-                }
-                return { l, h };
-            }
-        }
-        return { x, 0.0 };
-    }
-
-    double Mars::Biquad::process (double x) noexcept
-    {
-        const auto y = (c[0] * x + z1) / c[3];
-        z1 = (c[1] * x - c[4] * y) + z2;
-        z2 = (c[2] * x - c[5] * y);
-        return y;
     }
 
     //==============================================================================
@@ -597,7 +554,10 @@ namespace effects
                     Make::makeHighShelf (rate, 8000.0, 0.7, gain (tone[2])),
                     Make::makePeakFilter (rate, 4000.0, 1.0, gain (tone[3])) };
                 for (size_t i = 0; i < 4; ++i)
+                {
                     state.tone[i].c = made[i];
+                    state.tone[i].flat = juce::exactlyEqual (tone[i], 0.0f);
+                }
                 state.toneShown = tone;
             }
         }
@@ -617,7 +577,7 @@ namespace effects
         }
     }
 
-    void Mars::runSegment (juce::dsp::AudioBlock<float> block) noexcept
+    void Mars::runSegment (juce::dsp::AudioBlock<float> block, bool modulated) noexcept
     {
         const auto quality = currentQuality;
         const auto numBands = liveBands;
@@ -647,7 +607,10 @@ namespace effects
                 }
             }
             bandIn[(size_t) numBands - 1] = rest;
-            modulation.listen (in, bandIn);
+            // The modulation's followers only matter to the modulation (none
+            // in PR7-X): nothing heard depends on them.
+            if (modulated)
+                modulation.listen (in, bandIn);
 
             auto sum = 0.0;
             for (int b = 0; b < numBands; ++b)
@@ -691,7 +654,7 @@ namespace effects
                 modulation.tick (settings.modulation, context, (double) numSamples / baseRate);
                 wasModulated = false;
                 setKnobs (settings, false);
-                runSegment (block);
+                runSegment (block, false);
             }
             else
             {
@@ -712,7 +675,7 @@ namespace effects
                         untilTick = tickLength;
                     }
                     const auto length = juce::jmin ((size_t) untilTick, numSamples - done);
-                    runSegment (block.getSubBlock (done, length));
+                    runSegment (block.getSubBlock (done, length), true);
                     done += length;
                     untilTick -= (int) length;
                 }
