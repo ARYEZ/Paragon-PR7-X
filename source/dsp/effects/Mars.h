@@ -134,7 +134,16 @@ namespace effects
             void set (double sampleRate, double hz, double q) noexcept;
             void reset() noexcept { s1 = s2 = 0.0; }
             struct Out { double low, band, high; };
-            Out process (double x) noexcept;
+            // In the header (0.22.2) so it's built into the loops that use it.
+            forcedinline Out process (double x) noexcept
+            {
+                const auto v3 = x - s2;
+                const auto v1 = a1 * s1 + a2 * v3;
+                const auto v2 = s2 + a2 * s1 + a3 * v3;
+                s1 = 2.0 * v1 - s1;
+                s2 = 2.0 * v2 - s2;
+                return { v2, v1, x - k * v1 - v2 };
+            }
         };
 
         // One crossover: its low and high halves, Linkwitz-Riley, so they add
@@ -146,7 +155,40 @@ namespace effects
             Slope slope = Slope::db24;
             void set (double sampleRate, double hz, Slope newSlope) noexcept;
             void reset() noexcept;
-            std::pair<double, double> process (double x) noexcept;
+            // Its first stage is shared (0.22.2): low[0] and high[0] are set
+            // alike, reset together and fed the same input, so their sums are
+            // always the same; low[0] gives both halves (high[0] is unused).
+            forcedinline std::pair<double, double> process (double x) noexcept
+            {
+                switch (slope)
+                {
+                    case Slope::db6:
+                        onePoleState += onePole * (x - onePoleState);
+                        return { onePoleState, x - onePoleState };
+                    case Slope::db12:
+                    {
+                        const auto first = low[0].process (x);
+                        return { first.low, -first.high };
+                    }
+                    case Slope::db24:
+                    {
+                        const auto first = low[0].process (x);
+                        return { low[1].process (first.low).low, high[1].process (first.high).high };
+                    }
+                    case Slope::db48:
+                    {
+                        const auto first = low[0].process (x);
+                        auto l = first.low, h = first.high;
+                        for (size_t i = 1; i < low.size(); ++i)
+                        {
+                            l = low[i].process (l).low;
+                            h = high[i].process (h).high;
+                        }
+                        return { l, h };
+                    }
+                }
+                return { x, 0.0 };
+            }
             double allPass (double x) noexcept { const auto [l, h] = process (x); return l + h; }
         };
 
@@ -154,8 +196,23 @@ namespace effects
         {
             std::array<double, 6> c { 1, 0, 0, 1, 0, 0 };   // b0 b1 b2 a0 a1 a2, as JUCE makes them
             double z1 = 0.0, z2 = 0.0;
+            bool flat = false;   // set to 0 dB: it changes nothing, so it's skipped once its memory is empty
             void reset() noexcept { z1 = z2 = 0.0; }
-            double process (double x) noexcept;
+            forcedinline double process (double x) noexcept
+            {
+                if (flat)
+                {
+                    if (std::abs (z1) < 1.0e-12 && std::abs (z2) < 1.0e-12)
+                    {
+                        z1 = z2 = 0.0;
+                        return x;
+                    }
+                }
+                const auto y = (c[0] * x + z1) / c[3];
+                z1 = (c[1] * x - c[4] * y) + z2;
+                z2 = (c[2] * x - c[5] * y);
+                return y;
+            }
         };
 
         // A straight-line glide to a new value over a set number of samples.
@@ -214,7 +271,7 @@ namespace effects
         void setRate (int qualityIndex) noexcept;
         // The knobs as MARS plays them now: as set, or moved by the modulation.
         void setKnobs (const Settings&, bool modulated) noexcept;
-        void runSegment (juce::dsp::AudioBlock<float> block) noexcept;
+        void runSegment (juce::dsp::AudioBlock<float> block, bool modulated) noexcept;
         void resetBands() noexcept;
         double processBand (int band, double x, const Band& settings) noexcept;
         double saturate (BandState& state, Style style, double u, float drive) noexcept;

@@ -2,6 +2,32 @@
 
 Each version's notes appear on its GitHub Release page.
 
+## 0.22.3
+
+- **DOMINION and MARS are much lighter on the processor, with the same sound,** as you asked. Measured as a share of one processor core on this server (yours will differ, but the drop should be similar):
+
+  | | Before | Now |
+  |---|---|---|
+  | DOMINION | 12.7% | 4.9% |
+  | MARS, 1 band at 4x (its default) | 4.2% | 2.9% |
+  | MARS, 4 bands at 8x (its heaviest) | 25.7% | 16.5% |
+  | Master Gentle Polish | 23.4% | 12.8% |
+  | Modern Metal Master | 32.6% | 18.6% |
+  | Master Loud Club | 36.1% | 22.4% |
+
+- **What changed:** the same sums, in a faster order.
+  - **DOMINION** listens through 120 filters per channel. They used to run one after another down each block; now each sample goes through all of them side by side, which the processor does several at a time.
+  - Its cutting bells (still one after another on every sample) now work like an assembly line: all of them busy at once, each on a different sample.
+  - Its smoothing curves are worked out once instead of every 32 samples, and its two channels' sums are solved side by side.
+  - **MARS** splits the sound into bands with pairs of filters whose first halves are identical twins. It now works out that first half once, not twice.
+  - It no longer runs its modulation's listeners, which nothing uses (modulation is off in PR7-X), and its small filters are built straight into its main loop.
+  - It skips a tone control set to 0 dB, which does nothing.
+- **How I know the sound didn't change:** before changing anything, I rendered 229 settings through the plugin and kept the exact output: every MARS style at every quality, every slope and band count, all the presets of both, DOMINION's modes, depth curves, delta and band listening, switching on and off, a mono track, and all 32 master rigs. After the changes:
+  - **DOMINION's output is identical to the last bit** in every case.
+  - **MARS** is identical to the last bit, except where a tone control is at 0 dB. There it can differ by at most 0.00000015 (-136 dB), the very last digit the plugin works to, far below hearing and below even a 24-bit file's noise.
+  - That's because a 0 dB tone filter should pass the sound through unchanged, but when it ran, its maths rounded the last digit. Skipping it gives the ideal result, and it's the biggest single saving in MARS. If you'd rather have it bit-for-bit the same as before, I can put that filter back, at the cost of about a quarter of MARS's saving.
+- Nothing else changed: no new settings, and your projects, rigs and presets work as before.
+
 ## 0.22.2
 
 - **Much lighter on the computer with the window open.** With PR7-X's window open and nothing happening, it used about **85% of a processor core** just to draw itself, so a DAW's CPU meter jumped as soon as you opened it. The sound itself costs only about 2% at the defaults. The same was found and fixed in PR7-G, PR7-B and PR7-V.

@@ -106,7 +106,10 @@ namespace dominion
         {
             const auto w = 2.0 * pi * frequencies[(size_t) k] / sampleRate;
             const auto a = std::sin (w) / (2.0 * detectorQ), a0 = 1.0 + a;
-            detectors[(size_t) k] = { a / a0, 0.0, -a / a0, -2.0 * std::cos (w) / a0, (1.0 - a) / a0 };
+            detectorB0[(size_t) k] = a / a0;
+            detectorB2[(size_t) k] = -a / a0;
+            detectorA1[(size_t) k] = -2.0 * std::cos (w) / a0;
+            detectorA2[(size_t) k] = (1.0 - a) / a0;
             // The level over about 16 cycles (4 to 120 ms): steady enough that
             // noise's own flicker doesn't read as resonances.
             measure[(size_t) k] = 1.0 - std::exp (-1.0 / (juce::jlimit (0.004, 0.12, 16.0 / frequencies[(size_t) k]) * sampleRate));
@@ -123,13 +126,12 @@ namespace dominion
 
     void Processor::reset() noexcept
     {
-        detectorStates = {};
+        detectorZ1 = {};
+        detectorZ2 = {};
         power = {};
         reduction = {};
         gains = {};
         cutStates = {};
-        for (auto& channel : cuts)
-            channel.fill (Biquad {});
         listenStates = {};
         listening = -1;
         for (auto& channel : shown)
@@ -187,6 +189,7 @@ namespace dominion
 
         shapedFor = s;
         shaped = true;
+        smoothedFor = -1.0;   // the timing changed: its steps are worked out again
     }
 
     void Processor::updateCurve (const Settings& s)
@@ -224,6 +227,15 @@ namespace dominion
         // step (-35 at 5; a mix's parts mostly sit at -30 to -50).
         const auto hardThreshold = -20.0 - 3.0 * juce::jlimit (0.0, 20.0, s.depth);
         const auto maxCut = juce::jlimit (0.0, maxReductionDb, s.maxCutDb);
+        if (! juce::exactlyEqual (seconds, smoothedFor))
+        {
+            for (int k = 0; k < numFilters; ++k)
+            {
+                attackStep[(size_t) k] = 1.0 - std::exp (-seconds / attackSeconds[(size_t) k]);
+                releaseStep[(size_t) k] = 1.0 - std::exp (-seconds / releaseSeconds[(size_t) k]);
+            }
+            smoothedFor = seconds;
+        }
         for (int c = 0; c < numChannels; ++c)
         {
             const auto& e = level[(size_t) c];
@@ -259,25 +271,43 @@ namespace dominion
                 target = std::min (target * curve[(size_t) c][(size_t) k], maxCut);
 
                 auto& r = reduction[(size_t) c][(size_t) k];
-                const auto tau = target > r ? attackSeconds[(size_t) k] : releaseSeconds[(size_t) k];
-                r += (target - r) * (1.0 - std::exp (-seconds / tau));
+                r += (target - r) * (target > r ? attackStep[(size_t) k] : releaseStep[(size_t) k]);
             }
 
-            // Each bell's gain so that, overlapping, they cut what's wanted:
-            // a few Gauss-Seidel passes (kept to cuts), carried on from last time.
-            auto& g = gains[(size_t) c];
-            const auto& wanted = reduction[(size_t) c];
-            for (int pass = 0; pass < 3; ++pass)
-                for (int j = 0; j < numFilters; ++j)
-                {
-                    double sum = 0.0;
-                    const auto& row = overlap[(size_t) j];
-                    for (int offset = -reach; offset <= reach; ++offset)
-                        if (const auto k = j + offset; k >= 0 && k < numFilters)
-                            sum += row[(size_t) (offset + reach)] * g[(size_t) k];
-                    g[(size_t) j] = std::max (0.0, g[(size_t) j] + wanted[(size_t) j] - sum);
-                }
         }
+
+        // Each bell's gain so that, overlapping, they cut what's wanted:
+        // a few Gauss-Seidel passes (kept to cuts), carried on from last time.
+        // The channels are solved side by side (each its own sums, in the
+        // same order as on its own), so one's sums run while the other's wait.
+        for (int pass = 0; pass < 3; ++pass)
+            for (int j = 0; j < numFilters; ++j)
+            {
+                const auto& row = overlap[(size_t) j];
+                // The bells in reach (those past either end aren't there).
+                const auto first = std::max (-reach, -j), last = std::min (reach, numFilters - 1 - j);
+                auto& g0 = gains[0];
+                if (numChannels > 1)
+                {
+                    auto& g1 = gains[1];
+                    double sum0 = 0.0, sum1 = 0.0;
+                    for (int offset = first; offset <= last; ++offset)
+                    {
+                        const auto weight = (double) row[(size_t) (offset + reach)];
+                        sum0 += weight * g0[(size_t) (j + offset)];
+                        sum1 += weight * g1[(size_t) (j + offset)];
+                    }
+                    g0[(size_t) j] = std::max (0.0, g0[(size_t) j] + reduction[0][(size_t) j] - sum0);
+                    g1[(size_t) j] = std::max (0.0, g1[(size_t) j] + reduction[1][(size_t) j] - sum1);
+                }
+                else
+                {
+                    double sum0 = 0.0;
+                    for (int offset = first; offset <= last; ++offset)
+                        sum0 += (double) row[(size_t) (offset + reach)] * g0[(size_t) (j + offset)];
+                    g0[(size_t) j] = std::max (0.0, g0[(size_t) j] + reduction[0][(size_t) j] - sum0);
+                }
+            }
     }
 
     void Processor::process (juce::dsp::AudioBlock<float> block, const Settings& s) noexcept
@@ -350,20 +380,28 @@ namespace dominion
                         work.setSample (1, i, midSide ? 0.5f * (l - r) : r);
                 }
 
-                // Listen.
+                // Listen: each sample through every band pass at once (they
+                // don't depend on each other). b1 is 0, so z1 is z2 - a1 y.
                 for (int c = 0; c < numChannels; ++c)
                 {
                     const auto* x = work.getReadPointer (c);
-                    for (int k = 0; k < numFilters; ++k)
+                    auto* z1 = detectorZ1[(size_t) c].data();
+                    auto* z2 = detectorZ2[(size_t) c].data();
+                    auto* p = power[(size_t) c].data();
+                    const auto* b0 = detectorB0.data();
+                    const auto* b2 = detectorB2.data();
+                    const auto* a1 = detectorA1.data();
+                    const auto* a2 = detectorA2.data();
+                    const auto* m = measure.data();
+                    for (int i = 0; i < count; ++i)
                     {
-                        auto& state = detectorStates[(size_t) c][(size_t) k];
-                        auto& p = power[(size_t) c][(size_t) k];
-                        const auto& detector = detectors[(size_t) k];
-                        const auto m = measure[(size_t) k];
-                        for (int i = 0; i < count; ++i)
+                        const auto in = (double) x[i];
+                        for (int k = 0; k < numFilters; ++k)
                         {
-                            const auto y = tick (detector, state, x[i]);
-                            p += m * (y * y - p);
+                            const auto y = b0[k] * in + z1[k];
+                            z1[k] = z2[k] - a1[k] * y;
+                            z2[k] = b2[k] * in - a2[k] * y;
+                            p[k] += m[k] * (y * y - p[k]);
                         }
                     }
                 }
@@ -373,6 +411,7 @@ namespace dominion
                 for (int c = 0; c < numChannels; ++c)
                 {
                     auto* x = work.getWritePointer (c);
+                    int numActive = 0;
                     for (int k = 0; k < numFilters; ++k)
                     {
                         auto& gain = gains[(size_t) c][(size_t) k];
@@ -390,10 +429,29 @@ namespace dominion
                         }
                         const auto A = std::pow (10.0, -gain / 40.0), a = alpha[(size_t) k], cw = cosW[(size_t) k];
                         const auto a0 = 1.0 + a / A;
-                        auto& f = cuts[(size_t) c][(size_t) k];
-                        f = { (1.0 + a * A) / a0, -2.0 * cw / a0, (1.0 - a * A) / a0, -2.0 * cw / a0, (1.0 - a / A) / a0 };
-                        for (int i = 0; i < count; ++i)
-                            x[i] = (float) tick (f, state, x[i]);
+                        active[(size_t) numActive] = { (1.0 + a * A) / a0, -2.0 * cw / a0, (1.0 - a * A) / a0, -2.0 * cw / a0, (1.0 - a / A) / a0 };
+                        activeStates[(size_t) numActive] = state;
+                        activeIndex[(size_t) numActive++] = k;
+                    }
+
+                    // The bells in series as a pipeline: on step t, bell j works
+                    // on sample t - j, taking what bell j - 1 finished on the
+                    // step before (from the back, so it isn't overwritten
+                    // first). Each value is a float between bells, as before.
+                    if (numActive > 0)
+                    {
+                        for (int t = 0; t < count + numActive - 1; ++t)
+                        {
+                            const auto lastBell = std::min (numActive - 1, t), firstBell = std::max (0, t - count + 1);
+                            if (t < count)
+                                pipe[0] = x[t];
+                            for (int j = lastBell; j >= firstBell; --j)
+                                pipe[(size_t) j + 1] = (float) tick (active[(size_t) j], activeStates[(size_t) j], pipe[(size_t) j]);
+                            if (t >= numActive - 1)
+                                x[t - (numActive - 1)] = pipe[(size_t) numActive];
+                        }
+                        for (int j = 0; j < numActive; ++j)
+                            cutStates[(size_t) c][(size_t) activeIndex[(size_t) j]] = activeStates[(size_t) j];
                     }
                 }
 

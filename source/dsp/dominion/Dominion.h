@@ -120,22 +120,35 @@ namespace dominion
         int numFilters = 0;
         std::array<double, maxFilters> frequencies {};
 
-        // Listening
-        std::array<Biquad, maxFilters> detectors {};
-        std::array<std::array<State, maxFilters>, 2> detectorStates {};
+        // Listening: the band passes, as plain arrays (one entry per filter)
+        // so a sample goes through all of them side by side (0.22.2: the same
+        // sums as one filter at a time, several at once). Their b1 is 0.
+        std::array<double, maxFilters> detectorB0 {}, detectorB2 {}, detectorA1 {}, detectorA2 {};
+        std::array<std::array<double, maxFilters>, 2> detectorZ1 {}, detectorZ2 {};
         std::array<std::array<double, maxFilters>, 2> power {};
         std::array<double, maxFilters> measure {};   // power smoothing per sample
 
         // Cutting
         std::array<double, maxFilters> cosW {}, alpha {}, attackSeconds {}, releaseSeconds {};
+        // The reduction's smoothing for a sub-block of `smoothedFor` seconds
+        // (1 - e^(-seconds / tau)), worked out when the timing or that changes.
+        std::array<double, maxFilters> attackStep {}, releaseStep {};
+        double smoothedFor = -1.0;
         std::array<int, maxFilters> windowHalf {};   // SOFT's neighbourhood, in filters either side
         // The bells' overlap: how much of bell j's cut lands on filter k (k within reach of j).
         std::array<std::array<float, 2 * 48 + 1>, maxFilters> overlap {};
         int reach = 0;
         std::array<std::array<double, maxFilters>, 2> reduction {};   // the cut wanted, dB, smoothed
         std::array<std::array<double, maxFilters>, 2> gains {};       // each bell's gain, dB
-        std::array<std::array<Biquad, maxFilters>, 2> cuts {};
         std::array<std::array<State, maxFilters>, 2> cutStates {};
+        // The bells working now, gathered for one sub-block: each bell takes
+        // the sample the bell before it finished on the step before, so all
+        // of them work at once (a pipeline), each on the same samples, in the
+        // same order, as one bell after another.
+        std::array<Biquad, maxFilters> active {};
+        std::array<State, maxFilters> activeStates {};
+        std::array<int, maxFilters> activeIndex {};
+        std::array<float, maxFilters + 1> pipe {};
         std::array<std::array<double, maxFilters>, 2> curve {};       // the depth curve, as a factor
 
         Settings shapedFor, curvedFor;
