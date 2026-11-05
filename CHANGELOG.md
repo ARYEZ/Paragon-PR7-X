@@ -2,6 +2,15 @@
 
 Each version's notes appear on its GitHub Release page.
 
+## 0.24.0
+
+- **Two finishes now, with your names:**
+  - **OBSIDIAN** (was Pearl Black) is the black pearl unit, and it's now the **default**.
+  - **AURORA** (was Pearl White + Neon) is the white pearl unit.
+  - Both have black keys and knobs in neon pink-to-orange rings. Neither look has changed: compared pixel by pixel with 0.23.0, not one pixel differs.
+- **Pearl White is gone,** as you asked. If you had it chosen, PR7-X opens in Obsidian. A new install opens in Obsidian too.
+- SETTINGS > FINISH has the two buttons, OBSIDIAN and AURORA. Your choice is still saved on your computer, so every PR7-X you open uses it.
+
 ## 0.23.0
 
 - **Pearl Black and Pearl White + Neon get the new look from PR7-G 0.59.0, your design:** black keys and knobs in neon rings.

@@ -2,14 +2,15 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-// The unit's finish: pearl white, pearl black, or pearl white + neon. The
-// keys and knobs are black on every finish; on pearl black and pearl
-// white + neon the rings round them (the footswitches' and slot buttons'
-// bezels, the small keys' surrounds, the knobs' rings) and the expression
-// pedal's ribs carry the neon (pink to red to orange); on pearl white they
-// are chrome and plain red. Only the unit itself changes (its chassis, the
-// pedal's plate, the lettering printed on it, its rings); the screens, the
-// neon and the dark panels round it stay as they are.
+// The unit's finish (0.24.0, the owner's names): OBSIDIAN, a black pearl
+// unit (the default), or AURORA, a white pearl one. On both the keys and
+// knobs are black and the rings round them (the footswitches' and slot
+// buttons' bezels, the small keys' surrounds, the knobs' rings) carry the
+// neon, pink to red to orange. Only the unit itself changes (its chassis,
+// the lettering printed on it); the screens, the neon and the dark panels
+// round it stay as they are. (Until 0.24.0 they were Pearl Black and Pearl
+// White + Neon, beside a Pearl White with chrome rings, now retired; the
+// chrome drawing stays in the shared look-and-feel, unused.)
 //
 // It's a preference of the person, not part of a project or a rig: kept in a
 // small settings file in the user's application data folder, so every
@@ -17,15 +18,16 @@
 // window repaints when it changes.
 namespace Finish
 {
-    // Saved by number: only ever add to the end.
-    enum class Type { pearlWhite, pearlBlack, pearlWhiteNeon };
-    inline const juce::StringArray names { "Pearl White", "Pearl Black", "Pearl White + Neon" };
+    // Saved by number: only ever add to the end. 0 was Pearl White, retired
+    // in 0.24.0: a saved 0 (or nothing saved) opens as Obsidian.
+    enum class Type { retiredPearlWhite, obsidian, aurora };
+    inline const juce::StringArray names { "Pearl White (retired)", "Obsidian", "Aurora" };
 
     Type get();
     // `remember` saves it to the settings file (off for tests and snapshots).
     void set (Type, bool remember = true);
-    inline bool isBlack() { return get() == Type::pearlBlack; }          // the chassis colour
-    inline bool neonRings() { return get() != Type::pearlWhite; }        // the rings round keys and knobs, and the pedal's ribs
+    inline bool isBlack() { return get() == Type::obsidian; }               // the chassis colour
+    inline bool neonRings() { return get() != Type::retiredPearlWhite; }    // the rings round keys and knobs (both finishes now)
 
     // Told whenever the finish changes, to repaint.
     juce::ChangeBroadcaster& changes();

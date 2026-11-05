@@ -96,10 +96,10 @@ TEST_CASE ("Render the editor to a PNG", "[.][snapshot]")
 
     const auto showPresets = juce::SystemStats::getEnvironmentVariable ("PARAGON_SNAPSHOT_PAGE", {}) == "presets";
 
-    // PARAGON_SNAPSHOT_FINISH=black or =neon: the pearl black unit, or pearl
-    // white + neon (not saved as the preference).
+    // PARAGON_SNAPSHOT_FINISH=aurora (or the old name, neon) for the
+    // white unit; otherwise Obsidian, the default (not saved as the preference).
     const auto finish = juce::SystemStats::getEnvironmentVariable ("PARAGON_SNAPSHOT_FINISH", {});
-    Finish::set (finish == "black" ? Finish::Type::pearlBlack : finish == "neon" ? Finish::Type::pearlWhiteNeon : Finish::Type::pearlWhite, false);
+    Finish::set (finish == "aurora" || finish == "neon" ? Finish::Type::aurora : Finish::Type::obsidian, false);
     const auto rigFolder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("ParagonX1SnapshotRigs");
     rigFolder.deleteRecursively();
     processor.useRigFolder (rigFolder);

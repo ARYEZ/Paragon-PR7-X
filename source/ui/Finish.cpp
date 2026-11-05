@@ -29,11 +29,12 @@ namespace Finish
                 if (const auto from = old.getDefaultFile(), to = settingsOptions().getDefaultFile(); from.existsAsFile() && ! to.exists())
                     to.getParentDirectory().createDirectory() && from.copyFileTo (to);
                 juce::PropertiesFile file (settingsOptions());
-                const auto saved = file.getIntValue (settingKey, 0);
-                type = saved == (int) Type::pearlBlack || saved == (int) Type::pearlWhiteNeon ? (Type) saved : Type::pearlWhite;
+                // Obsidian unless Aurora was chosen (Pearl White, retired, opens as Obsidian).
+                const auto saved = file.getIntValue (settingKey, (int) Type::obsidian);
+                type = saved == (int) Type::aurora ? Type::aurora : Type::obsidian;
             }
 
-            Type type = Type::pearlWhite;
+            Type type = Type::obsidian;
             juce::ChangeBroadcaster broadcaster;
         };
 
@@ -50,6 +51,8 @@ namespace Finish
 
     void set (Type type, bool remember)
     {
+        if (type == Type::retiredPearlWhite)
+            type = Type::obsidian;   // no longer offered
         if (remember)
         {
             juce::PropertiesFile file (settingsOptions());

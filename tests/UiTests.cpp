@@ -105,9 +105,11 @@ TEST_CASE ("The window opens as big as fits above the taskbar, up to 1824 x 1026
     CHECK (Editor::openingSize ({ 800, 600 }).x == 960);   // never below the smallest size
 }
 
-TEST_CASE ("PEARL BLACK recolours the unit's printing, and every open window follows", "[ui]")
+TEST_CASE ("OBSIDIAN and AURORA recolour the unit's printing, and every open window follows", "[ui]")
 {
-    Finish::set (Finish::Type::pearlWhite, false);
+    // 0.24.0: two finishes, OBSIDIAN (black, the default) and AURORA (white);
+    // Pearl White is retired, and asking for it gives Obsidian.
+    Finish::set (Finish::Type::aurora, false);
     ParagonX1AudioProcessor processor;
     std::unique_ptr<juce::AudioProcessorEditor> first (processor.createEditor()), second (processor.createEditor());
 
@@ -121,30 +123,43 @@ TEST_CASE ("PEARL BLACK recolours the unit's printing, and every open window fol
                 return label->findColour (juce::Label::textColourId);
         return juce::Colour();
     };
-    CHECK (rigLevelColour (*first) == ParagonColours::ink);
-
-    // Chosen in one window (here, without saving the preference), it shows in both.
-    Finish::set (Finish::Type::pearlBlack, false);
-    CHECK (Finish::isBlack());
-    CHECK (rigLevelColour (*first) == Finish::ink());
-    CHECK (rigLevelColour (*second) == Finish::ink());
-    CHECK (Finish::ink().getPerceivedBrightness() > 0.8f);
-
-    // Pearl white + neon: the white unit's ink, the neon rings.
-    Finish::set (Finish::Type::pearlWhiteNeon, false);
     CHECK (! Finish::isBlack());
     CHECK (Finish::neonRings());
     CHECK (rigLevelColour (*first) == ParagonColours::ink);
 
-    // The key and knob drawing still works in every finish.
-    for (const auto type : { Finish::Type::pearlBlack, Finish::Type::pearlWhiteNeon, Finish::Type::pearlWhite })
+    // Chosen in one window (here, without saving the preference), it shows in both.
+    Finish::set (Finish::Type::obsidian, false);
+    CHECK (Finish::isBlack());
+    CHECK (Finish::neonRings());
+    CHECK (rigLevelColour (*first) == Finish::ink());
+    CHECK (rigLevelColour (*second) == Finish::ink());
+    CHECK (Finish::ink().getPerceivedBrightness() > 0.8f);
+
+    // The retired Pearl White isn't offered: asking for it gives Obsidian.
+    Finish::set (Finish::Type::aurora, false);
+    Finish::set (Finish::Type::retiredPearlWhite, false);
+    CHECK (Finish::get() == Finish::Type::obsidian);
+
+    // SETTINGS offers just the two, by their names.
+    std::vector<juce::TextButton*> buttons;
+    findAll (*first, buttons);
+    const auto hasButton = [&] (const juce::String& text)
+    {
+        return std::any_of (buttons.begin(), buttons.end(), [&] (auto* b) { return b->getButtonText() == text; });
+    };
+    CHECK (hasButton ("OBSIDIAN"));
+    CHECK (hasButton ("AURORA"));
+    CHECK_FALSE (hasButton ("PEARL WHITE"));
+
+    // The key and knob drawing works in both finishes.
+    for (const auto type : { Finish::Type::aurora, Finish::Type::obsidian })
     {
         Finish::set (type, false);
         first->setSize (1280, 720);
         const auto image = first->createComponentSnapshot (first->getLocalBounds());
         CHECK (image.isValid());
     }
-    CHECK (rigLevelColour (*first) == ParagonColours::ink);
+    CHECK (rigLevelColour (*first) == Finish::ink());
 }
 
 TEST_CASE ("The chain's blocks open their stomps' pages; there's no dock under the unit (from 0.17.0)", "[ui]")
