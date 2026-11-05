@@ -463,11 +463,11 @@ void MainView::applyFinish()
 {
     for (auto* label : { &rigLevelLabel, &presenceLabel })
         label->setColour (juce::Label::textColourId, Finish::ink());
-    // The cluster's names: red over black keys; over neon keys red was
-    // hard to read, so they're printed in the unit's ink (white on pearl
-    // black, dark on pearl white). HOLD TO TUNER stays red.
+    // The cluster's names: red on pearl white; beside the neon rings red was
+    // hard to read, so there they're printed in the unit's ink (white on
+    // pearl black, dark on pearl white + neon).
     for (auto* label : { &undoLabel, &redoLabel, &bypassLabel, &oracleLabel })
-        label->setColour (juce::Label::textColourId, Finish::neonKeys() ? Finish::ink() : Finish::printedRed());
+        label->setColour (juce::Label::textColourId, Finish::neonRings() ? Finish::ink() : Finish::printedRed());
     pedal.refinish();
     repaint();
 }

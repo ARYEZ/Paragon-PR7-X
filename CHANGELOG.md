@@ -2,6 +2,16 @@
 
 Each version's notes appear on its GitHub Release page.
 
+## 0.23.0
+
+- **Pearl Black and Pearl White + Neon get the new look from PR7-G 0.59.0, your design:** black keys and knobs in neon rings.
+  - **Every key and knob is black,** as on Pearl White: the six POWER footswitches, the rack units' keys, UNDO, REDO, BYPASS, ORACLE, SAVE, SAVE AS and EDIT, and all the knobs. No more pink-to-orange keys and knobs.
+  - **The pink-to-red-to-orange gradient moves to the rings round them.** The POWER footswitches' bezels and the small keys' surrounds keep the chrome's lighting: lit along the top, darker at the front. The knobs' glowing rings run through the gradient, a little brighter, since they're lights.
+  - **The small keys' labels stay in the unit's ink:** white on Pearl Black, dark on Pearl White + Neon.
+  - **Pearl White doesn't change at all.** I compared it pixel by pixel before and after, and not one pixel differs.
+- **One part of PR7-G's change doesn't apply here:** the expression pedal's ribbed tread. PR7-X hasn't had an expression pedal since 0.12.0.
+- SETTINGS > FINISH and the finish buttons' tooltips describe the new look.
+
 ## 0.22.3
 
 - **DOMINION and MARS are much lighter on the processor, with the same sound,** as you asked. Measured as a share of one processor core on this server (yours will differ, but the drop should be similar):

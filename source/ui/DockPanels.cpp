@@ -327,8 +327,8 @@ SettingsPage::SettingsPage (ParagonX1AudioProcessor& p)
     };
 
     pearlWhite.setTooltip ("The original pearl white unit with black keys and knobs");
-    pearlWhiteNeon.setTooltip ("The pearl white unit with neon pink-to-orange keys and knobs");
-    pearlBlack.setTooltip ("A pearl black unit with neon pink-to-orange keys and knobs");
+    pearlWhiteNeon.setTooltip ("The pearl white unit with black keys and knobs in neon pink-to-orange rings");
+    pearlBlack.setTooltip ("A pearl black unit with black keys and knobs in neon pink-to-orange rings");
     pearlWhite.onClick = [] { Finish::set (Finish::Type::pearlWhite); };
     pearlWhiteNeon.onClick = [] { Finish::set (Finish::Type::pearlWhiteNeon); };
     pearlBlack.onClick = [] { Finish::set (Finish::Type::pearlBlack); };
@@ -376,7 +376,7 @@ void SettingsPage::paint (juce::Graphics& g)
     section (tunerArea, "TUNER AND ORACLE", "The ORACLE key, beside BYPASS, opens ORACLE's page: switch it on there to show the pitch of what's "
                                             "playing on the screen and transcribe it to MIDI as your DAW plays. Reference pitch for A4:");
     section (finishArea, "FINISH",
-             "The unit's colour: pearl white with black keys, or pearl white or pearl black with neon pink-to-orange keys. "
+             "The unit's colour: pearl white with chrome rings, or pearl white or pearl black with neon pink-to-orange rings round the black keys and knobs. "
              "Saved on this computer, so every Paragon PR7-X you open uses it.");
     section (rigsArea, "RIGS", "Your rigs are files in this folder, so you can back them up or share them:\n"
                                + processor.getRigLibrary().getFolder().getFullPathName());
