@@ -96,7 +96,7 @@ private:
     ParagonX1AudioProcessor& processor;
     juce::Slider reference { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::TextButton openFolder { "OPEN RIGS FOLDER" };
-    juce::TextButton pearlWhite { "PEARL WHITE" }, pearlWhiteNeon { "WHITE + NEON" }, pearlBlack { "PEARL BLACK" };
+    juce::TextButton obsidian { "OBSIDIAN" }, aurora { "AURORA" };   // the finishes (Pearl White retired in 0.24.0)
     juce::Rectangle<int> tunerArea, finishArea, rigsArea, aboutArea;
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { showFinish(); }

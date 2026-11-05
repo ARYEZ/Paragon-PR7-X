@@ -5,6 +5,7 @@
 #include <ctime>
 #include <thread>
 #include <catch2/catch_test_macros.hpp>
+#include <map>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "Parameters.h"
@@ -105,9 +106,11 @@ TEST_CASE ("The window opens as big as fits above the taskbar, up to 1824 x 1026
     CHECK (Editor::openingSize ({ 800, 600 }).x == 960);   // never below the smallest size
 }
 
-TEST_CASE ("PEARL BLACK recolours the unit's printing, and every open window follows", "[ui]")
+TEST_CASE ("OBSIDIAN and AURORA recolour the unit's printing, and every open window follows", "[ui]")
 {
-    Finish::set (Finish::Type::pearlWhite, false);
+    // 0.24.0: two finishes, OBSIDIAN (black, the default) and AURORA (white);
+    // Pearl White is retired, and asking for it gives Obsidian.
+    Finish::set (Finish::Type::aurora, false);
     ParagonX1AudioProcessor processor;
     std::unique_ptr<juce::AudioProcessorEditor> first (processor.createEditor()), second (processor.createEditor());
 
@@ -121,30 +124,43 @@ TEST_CASE ("PEARL BLACK recolours the unit's printing, and every open window fol
                 return label->findColour (juce::Label::textColourId);
         return juce::Colour();
     };
-    CHECK (rigLevelColour (*first) == ParagonColours::ink);
-
-    // Chosen in one window (here, without saving the preference), it shows in both.
-    Finish::set (Finish::Type::pearlBlack, false);
-    CHECK (Finish::isBlack());
-    CHECK (rigLevelColour (*first) == Finish::ink());
-    CHECK (rigLevelColour (*second) == Finish::ink());
-    CHECK (Finish::ink().getPerceivedBrightness() > 0.8f);
-
-    // Pearl white + neon: the white unit's ink, the neon rings.
-    Finish::set (Finish::Type::pearlWhiteNeon, false);
     CHECK (! Finish::isBlack());
     CHECK (Finish::neonRings());
     CHECK (rigLevelColour (*first) == ParagonColours::ink);
 
-    // The key and knob drawing still works in every finish.
-    for (const auto type : { Finish::Type::pearlBlack, Finish::Type::pearlWhiteNeon, Finish::Type::pearlWhite })
+    // Chosen in one window (here, without saving the preference), it shows in both.
+    Finish::set (Finish::Type::obsidian, false);
+    CHECK (Finish::isBlack());
+    CHECK (Finish::neonRings());
+    CHECK (rigLevelColour (*first) == Finish::ink());
+    CHECK (rigLevelColour (*second) == Finish::ink());
+    CHECK (Finish::ink().getPerceivedBrightness() > 0.8f);
+
+    // The retired Pearl White isn't offered: asking for it gives Obsidian.
+    Finish::set (Finish::Type::aurora, false);
+    Finish::set (Finish::Type::retiredPearlWhite, false);
+    CHECK (Finish::get() == Finish::Type::obsidian);
+
+    // SETTINGS offers just the two, by their names.
+    std::vector<juce::TextButton*> buttons;
+    findAll (*first, buttons);
+    const auto hasButton = [&] (const juce::String& text)
+    {
+        return std::any_of (buttons.begin(), buttons.end(), [&] (auto* b) { return b->getButtonText() == text; });
+    };
+    CHECK (hasButton ("OBSIDIAN"));
+    CHECK (hasButton ("AURORA"));
+    CHECK_FALSE (hasButton ("PEARL WHITE"));
+
+    // The key and knob drawing works in both finishes.
+    for (const auto type : { Finish::Type::aurora, Finish::Type::obsidian })
     {
         Finish::set (type, false);
         first->setSize (1280, 720);
         const auto image = first->createComponentSnapshot (first->getLocalBounds());
         CHECK (image.isValid());
     }
-    CHECK (rigLevelColour (*first) == ParagonColours::ink);
+    CHECK (rigLevelColour (*first) == Finish::ink());
 }
 
 TEST_CASE ("The chain's blocks open their stomps' pages; there's no dock under the unit (from 0.17.0)", "[ui]")
@@ -686,10 +702,14 @@ TEST_CASE ("A rack unit redrawn only where a reading moved matches the unit draw
         set (processor, id, 1.0f);
     set (processor, ParamIDs::compThreshold, -40.0f);
 
-    auto checked = 0;
+    // Both finishes (0.24.0: Obsidian, the default, and Aurora), so the test
+    // doesn't depend on which one a fresh process starts in.
+    std::map<Finish::Type, int> checked;
+    for (const auto finish : { Finish::Type::obsidian, Finish::Type::aurora })
     for (auto* rack : racks)
     {
-        CAPTURE (rack->getSpec().name);
+        Finish::set (finish, false);
+        CAPTURE (Finish::names[(int) finish], rack->getSpec().name);
         REQUIRE (! rack->getBounds().isEmpty());
         // Quiet first, so the readings fall back; then loud sound moves them.
         playNoiseThrough (processor, 400, 0.0f);
@@ -721,21 +741,40 @@ TEST_CASE ("A rack unit redrawn only where a reading moved matches the unit draw
             patched.clear (part);
             draw (patched, part);
         }
-        ++checked;
+        ++checked[finish];
         juce::Image whole (juce::Image::ARGB, rack->getWidth(), rack->getHeight(), true);
         draw (whole, {});
 
-        int worst = 0;
+        // Out of 255. Stale pixels (a reading drawn outside the parts that
+        // are redrawn) would differ a lot, anywhere. Smoothing where a
+        // redrawn part meets its own edge differs by a point, or two on
+        // macOS (its drawing smooths a clip's edge a little differently on
+        // Obsidian's dark metal): allowed only on a part's 1-pixel rim.
+        const auto onRim = [&parts] (int x, int y)
+        {
+            for (const auto& part : parts)
+                if (part.expanded (1).contains (x, y) && ! part.reduced (1).contains (x, y))
+                    return true;
+            return false;
+        };
+        int worst = 0, worstInside = 0;
         for (int y = 0; y < whole.getHeight(); ++y)
             for (int x = 0; x < whole.getWidth(); ++x)
             {
                 const auto a = whole.getPixelAt (x, y), b = patched.getPixelAt (x, y);
-                worst = juce::jmax (worst, std::abs ((int) a.getRed() - (int) b.getRed()), std::abs ((int) a.getGreen() - (int) b.getGreen()));
-                worst = juce::jmax (worst, std::abs ((int) a.getBlue() - (int) b.getBlue()), std::abs ((int) a.getAlpha() - (int) b.getAlpha()));
+                const auto difference = juce::jmax (std::abs ((int) a.getRed() - (int) b.getRed()), std::abs ((int) a.getGreen() - (int) b.getGreen()),
+                                                    std::abs ((int) a.getBlue() - (int) b.getBlue()), std::abs ((int) a.getAlpha() - (int) b.getAlpha()));
+                worst = juce::jmax (worst, difference);
+                if (! onRim (x, y))
+                    worstInside = juce::jmax (worstInside, difference);
             }
-        CHECK (worst <= 1);   // out of 255: smoothing where a redrawn part meets its own edge, invisible
+        CHECK (worstInside <= 1);   // everywhere but the rims: the same, to the smoothing's point
+        CHECK (worst <= 3);         // the rims: a point or two of smoothing, invisible
     }
-    CHECK (checked >= 4);   // the units with a live reading: DOMINION, CONSTRICTOR, MARS, BINARY, GUILLOTINE
+    // The units whose reading moved (of DOMINION, CONSTRICTOR, MARS, BINARY
+    // and GUILLOTINE; a held reading may not move again on the second pass).
+    CHECK (checked[Finish::Type::obsidian] >= 3);
+    CHECK (checked[Finish::Type::aurora] >= 3);
 }
 
 TEST_CASE ("A screen draws the same whatever colour was set before it (its kept shadow isn't faded)", "[ui]")
