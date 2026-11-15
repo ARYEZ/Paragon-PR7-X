@@ -29,6 +29,11 @@ public:
     void refinish();
 
     void paint (juce::Graphics&) override;
+    // The pearl alone (glow, chassis, face, section panels, insets, the pedal's
+    // bay), without the printing or the badge. `dim`: Aurora's pearl 10% less
+    // bright (Finish::auroraDimming), laid once over all of it; paint() always
+    // dims, the test compares the two.
+    void paintPearl (juce::Graphics&, bool dim) const;
     void resized() override;
 
 private:

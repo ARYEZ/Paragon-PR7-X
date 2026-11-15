@@ -48,6 +48,19 @@ void PedalBody::refinish()
 
 void PedalBody::paint (juce::Graphics& g)
 {
+    paintPearl (g, true);
+
+    // The printing and the badge go on after the dimming, in their own colours.
+    g.setColour (Finish::isBlack() ? Finish::printedRed() : ParagonColours::glow.darker (0.1f));
+    g.strokePath (geometry.printedRed, juce::PathStrokeType (1.2f));
+    g.setColour (Finish::ink().withAlpha (0.8f));
+    g.strokePath (geometry.printedInk, juce::PathStrokeType (1.2f));
+
+    paintBadge (g);
+}
+
+void PedalBody::paintPearl (juce::Graphics& g, bool dim) const
+{
     // Every colour has its pearl white and its pearl black version.
     const auto black = Finish::isBlack();
     using Finish::pick;
@@ -249,12 +262,26 @@ void PedalBody::paint (juce::Graphics& g)
         g.drawRoundedRectangle (bay, 22.0f, 1.0f);
     }
 
-    g.setColour (black ? Finish::printedRed() : ParagonColours::glow.darker (0.1f));
-    g.strokePath (geometry.printedRed, juce::PathStrokeType (1.2f));
-    g.setColour (Finish::ink().withAlpha (0.8f));
-    g.strokePath (geometry.printedInk, juce::PathStrokeType (1.2f));
+    // 7. Aurora's pearl, all of it (rim, face, section panels under the rack
+    //    units, insets, the pedal's bay), 10% less bright (auroraDimming), in
+    //    one go so no edge is darkened twice. The glow round the unit isn't
+    //    pearl, so it's left alone. The rack units, keys and knobs are their
+    //    own components drawn over this buffered picture, so their partial
+    //    redraws see the same dimmed pearl as a whole redraw.
+    if (dim)
+    {
+        Finish::dimPearl (g, chassisPath);
 
-    paintBadge (g);
+        // A pedal's bay would be its own housing beside the chassis (none on PR7-X).
+        if (const auto bay = geometry.pedalBay; ! bay.isEmpty())
+        {
+            juce::Graphics::ScopedSaveState state (g);
+            g.excludeClipRegion (chassis.getSmallestIntegerContainer());   // never darken the chassis twice
+            juce::Path bayPath;
+            bayPath.addRoundedRectangle (bay, 22.0f);
+            Finish::dimPearl (g, bayPath);
+        }
+    }
 }
 
 void PedalBody::strokeTopHighlight (juce::Graphics& g, juce::Rectangle<float> area, float radius, float thickness, float alpha)
