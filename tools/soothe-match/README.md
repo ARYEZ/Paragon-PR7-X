@@ -13,8 +13,8 @@ match: a black-box comparison of outputs, never anyone's code.
   resonance gliding 60 Hz to 14 kHz; a switched 2.5 kHz resonance (attack and
   release); the fixed resonances at four levels; a drum loop; and stereo
   (a different resonance each side, then one in the sides only).
-- `render-sheet.md`: what the owner renders through soothe 3 (R00 to R15,
-  one setting changed from soothe's defaults at a time).
+- `render-sheet.md`: what the owner renders through soothe 3 (R00 to R27, using
+  soothe 3's own controls, one change from its defaults at a time).
 - `measure.py dry.wav sections.json wet.wav [...]`: lines each render up with
   the dry file (cross-correlation; reports the delay), then measures each
   section and prints the renders side by side:
