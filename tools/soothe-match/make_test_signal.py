@@ -1,10 +1,11 @@
-# The soothe comparison test signal: one 48 kHz stereo file of sections,
+# The soothe comparison test signal: one stereo file of sections (48 kHz,
+# or the rate given as a third argument, e.g. 44100),
 # each built to show one thing about how a resonance suppressor behaves.
 import json, sys
 import numpy as np
 import soundfile as sf
 
-SR = 48000
+SR = int(sys.argv[3]) if len(sys.argv) > 3 else 48000
 rng = np.random.default_rng(20261119)
 
 def pink(n):

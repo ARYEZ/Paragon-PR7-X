@@ -5,8 +5,10 @@ test file 16 times through soothe 3, each time with **one** setting changed.
 
 ## Setting up (once)
 
-1. In your DAW, make a new project at **48 kHz**.
-2. Put `soothe_test_48k.wav` on a stereo audio track, starting at the very
+1. In your DAW, make a new project at the rate you work at, and use the test file
+   made at that rate (`soothe_test_44k.wav` for 44.1 kHz, `soothe_test_48k.wav` for 48 kHz),
+   so nothing is resampled.
+2. Put the test file on a stereo audio track, starting at the very
    beginning (bar 1, time 0).
 3. Put **soothe 3** on that track, the only plugin on it. Nothing on the
    master bus either (no limiter, no EQ).
@@ -17,7 +19,7 @@ test file 16 times through soothe 3, each time with **one** setting changed.
 
 - Export the whole file from the start to the end (about 56 seconds): the
   tail at the end matters.
-- Format: **WAV, 48 kHz, 24-bit or 32-bit float, stereo**.
+- Format: **WAV, the project's rate, 24-bit or 32-bit float, stereo**.
 - **No normalising, no dither,** nothing on the master.
 - An offline or faster-than-real-time bounce is fine.
 - Name each file as below (`R01.wav` and so on).
