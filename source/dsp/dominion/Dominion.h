@@ -69,7 +69,7 @@ namespace dominion
         // SOFT's sense of where to work (fitted: soothe hardly cuts below 500 Hz): a weight on the cut at 25 Hz, 50 Hz ... 12.8 kHz (an octave apart), in between on a log scale.
         std::array<double, 10> weight { 0.0, 0.0, 0.0, 0.11, 0.0467, 0.3, 0.6, 1.0, 0.8, 0.5 };
         // Timing at 1 kHz: ATTACK at 0, 25, 50 and 100 %, RELEASE at 0, 50 and 100 % (ms), and how they scale with frequency.
-        double attack0 = 30.7, attack25 = 46.2, attack50 = 107.0, attack100 = 280.0;
+        double attack0 = 30.7, attack25 = 46.2, attack50 = 107.0, attack100 = 600.0;
         double release0 = 37.0, release50 = 96.7, release100 = 797.0;
         double timingPower = 0.5;
         // HARD's attack and release against SOFT's (soothe's HARD grabs slower and lets go sooner).

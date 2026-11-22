@@ -29,3 +29,26 @@ match: a black-box comparison of outputs, never anyone's code.
 
 soothe's renders aren't kept in the repository (they're its output, and
 large).
+
+## Fitting DOMINION's REFINED engine (0.25.0)
+
+`fit/` holds the scripts that fitted REFINED to the owner's 28 renders
+(R00 to R27, soothe 3 1.0.6 at 44.1 kHz). They need the renders, which
+stay out of the repository (they're soothe's output): set `SOOTHE_DIR` to
+a folder with `soothe_test_44k.wav`, `sections_44k.json` and
+`renders/R00.wav` ... `R27.wav`, and build the tests first.
+
+- `fitlib.py`: each render's DOMINION settings (`CASES`: soothe's 0 to 10
+  as 0 to 100 %, DEPTH as is), rendering through the hidden test
+  `"[domfit]"` (in `tests/DominionTests.cpp`, any `dominion::Tuning` number
+  by name), and the score: the measured numbers' differences, squared
+  (dB, and times as 10 x log2).
+- `fit.py STAGE [tries]`: Powell's method over one stage's numbers
+  (`static`: depth, detail, widths, where it works; `timing`; `hard`),
+  keeping the best in `fit/tuning.json`.
+- `diag.py` and `sdiag.py`: side-by-side readings (timing, and cuts) for
+  chosen renders.
+
+The fitted numbers are the defaults in `dominion::Tuning` (Dominion.h).
+R23 (DELTA) is checked on its own: soothe's delta is exactly input minus
+output, as DOMINION's is.
