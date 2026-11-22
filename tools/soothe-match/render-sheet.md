@@ -51,6 +51,39 @@ the files.
 If soothe 3 has no control by one of these names, or calls it something else,
 skip that render (or use the closest one) and tell me which.
 
+## Extra renders, if you have time (well worth it during the trial)
+
+The more points we measure, the closer the match, and the trial won't last
+forever. Same steps: reset to defaults, then change only what's listed.
+
+| File | soothe 3 settings | Write down |
+|---|---|---|
+| R16 | DEPTH about **10%** of the way up | value |
+| R17 | DEPTH **halfway** | value |
+| R18 | SHARPNESS about **a quarter** of the way up | value |
+| R19 | SHARPNESS about **three quarters** of the way up | value |
+| R20 | SELECTIVITY about **a quarter** of the way up | value |
+| R21 | SELECTIVITY about **three quarters** of the way up | value |
+| R22 | ATTACK about **halfway** between its default and fastest | value |
+| R23 | RELEASE about **halfway** between its default and slowest | value |
+| R24 | **HARD**, DEPTH about **a quarter** of the way up | value |
+| R25 | **HARD**, DEPTH about **three quarters** of the way up | value |
+| R26 | **DELTA** on (you hear only what soothe removes) | — |
+| R27 | defaults, **MIX at 50%** | — |
+
+**Two more things that help a lot:**
+
+- **Screenshots** of soothe 3 at its defaults, showing every control, page and
+  menu (including the quality or latency setting). They tell me the controls'
+  names and ranges, so DOMINION's knobs can line up with soothe's.
+- **Your own music:** one vocal and one full mix you know well, exported twice
+  each, once dry and once through soothe at its defaults (e.g. `vocal_dry`,
+  `vocal_soothe`, `mix_dry`, `mix_soothe`). These are for listening and
+  measuring on real material, not only test tones.
+
+One check: if the trial ever puts silence or noise into its output (some
+trials do), tell me which renders it happened in.
+
 ## Sending them back
 
 There are 16 files of about 16 MB each.
