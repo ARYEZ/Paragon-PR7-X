@@ -85,6 +85,8 @@ namespace ParamIDs
     inline constexpr auto domMix     = "domMix";       // %
     inline constexpr auto domOut     = "domOut";       // dB
     inline constexpr auto domDelta   = "domDelta";
+    inline constexpr auto domEngine  = "domEngine";    // choice: Classic, Refined (0.25.0, fitted to soothe 3's measurements)
+    inline constexpr auto domLookahead = "domLookahead";   // REFINED hearing ahead (52 ms late at 44.1 / 48 kHz)
     inline constexpr int domNumBands = 8;
     // The depth curve's bands: "domB1Used", "domB1Freq"... `what` is one of the names below.
     inline juce::String domBand (int band, const char* what) { return "domB" + juce::String (band + 1) + what; }

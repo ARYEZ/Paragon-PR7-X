@@ -182,6 +182,11 @@ std::vector<StompPreset> DominionPresetTraits::makeFactory()
     using namespace ParamIDs;
     std::vector<StompPreset> presets {
         make ("", "Default", {}, {}),
+        // (0.25.0) The REFINED engine at soothe 3's own starting point, as
+        // measured: RELEASE 30% (its 3.0), left/right, and its default curve
+        // (a 100 Hz low cut, +2.5 at 4 kHz, a 16 kHz high cut).
+        make ("", "Refined Default", { { domEngine, 1.0f }, { domStereo, 0.0f }, { domRelease, 30.0f } },
+              { { Shape::lowCut, 100.0f, 0.0f, 0.71f, 24 }, { Shape::bell, 4000.0f, 2.5f, 0.7f }, { Shape::highCut, 16000.0f, 0.0f, 0.71f, 24 } }),
 
         make ("Vocals", "Vocal De-Harsh", { { domDepth, 5.0f }, { domDetail, 60.0f }, { domAttack, 40.0f } },
               { { Shape::lowCut, 200.0f }, { Shape::bell, 3500.0f, 4.0f, 0.8f } }),

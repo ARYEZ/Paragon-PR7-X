@@ -182,9 +182,9 @@ effects::StereoTools::Settings ParagonX1AudioProcessor::getStereoSettings() cons
 
 void ParagonX1AudioProcessor::updateLatency()
 {
-    // Only COMP's LOOK-AHEAD delays the sound (the NAM amp, which also did, went with PR7-B's bass blocks).
-    // COMP's LOOK-AHEAD, and the LIMITER's (with its oversampling and true peak).
+    // COMP's LOOK-AHEAD, DOMINION's (REFINED, while on) and the LIMITER's (with its oversampling and true peak).
     const auto latency = (isOn (ParamIDs::mbLookahead) ? (int) std::lround (effects::multiband::lookaheadSeconds * inputTap.getSampleRate()) : 0)
+                         + dominionProcessor.getLatencySamples (getDominionSettings())
                          + limiter.getLatencySamples (getLimiterSettings());
     if (latency != getLatencySamples())
         setLatencySamples (latency);
@@ -267,6 +267,8 @@ dominion::Settings ParagonX1AudioProcessor::getDominionSettings() const noexcept
 {
     dominion::Settings s;
     s.on = isOn (ParamIDs::domOn);
+    s.engine = (dominion::Engine) juce::jlimit (0, dominion::engineNames.size() - 1, juce::roundToInt (param (ParamIDs::domEngine)));
+    s.lookahead = isOn (ParamIDs::domLookahead);
     s.mode = (dominion::Mode) juce::jlimit (0, 1, juce::roundToInt (param (ParamIDs::domMode)));
     s.depth = param (ParamIDs::domDepth);
     s.detail = param (ParamIDs::domDetail);

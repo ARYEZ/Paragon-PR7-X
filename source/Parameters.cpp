@@ -259,6 +259,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         layout.add (makeFloat (ParamIDs::domMix, "Dominion Mix", { 0.0f, 100.0f, 1.0f }, 100.0f, v34, percent));
         layout.add (makeFloat (ParamIDs::domOut, "Dominion Out", { -12.0f, 12.0f, 0.1f }, 0.0f, v34, asDb));
         layout.add (makeSwitch (ParamIDs::domDelta, "Dominion Delta", v34, false));
+        constexpr int v38 = 38;
+        layout.add (makeChoice (ParamIDs::domEngine, "Dominion Engine", v38, dominion::engineNames, (int) dominion::Engine::classic));
+        layout.add (makeSwitch (ParamIDs::domLookahead, "Dominion Look-Ahead", v38, true));
         for (int band = 0; band < ParamIDs::domNumBands; ++band)
         {
             const auto id = [band] (const char* what) { return ParamIDs::domBand (band, what); };

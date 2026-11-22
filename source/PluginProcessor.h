@@ -335,7 +335,7 @@ private:
 
     // BYPASS: the clean input, delayed by our latency so switching bypass
     // never shifts the sound in time, crossfaded in over 20 ms.
-    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::None> bypassDelay { 8192 };
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::None> bypassDelay { 32768 };
     juce::AudioBuffer<float> bypassDry;
     juce::SmoothedValue<float> bypassAmount;
 

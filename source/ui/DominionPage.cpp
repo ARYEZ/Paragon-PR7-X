@@ -502,9 +502,13 @@ DominionPage::DominionPage (ParagonX1AudioProcessor& p)
       display (p),
       onAttachment (p.getParameters(), ParamIDs::domOn, onButton),
       deltaAttachment (p.getParameters(), ParamIDs::domDelta, delta),
+      lookaheadAttachment (p.getParameters(), ParamIDs::domLookahead, lookahead),
       mode (p.getParameters(), ParamIDs::domMode, "MODE",
             "SOFT: finds what sticks out above the sound around it, at any level (resonances, harshness, build-ups). "
             "HARD: works on what's loud, so it depends on the level: firmer, and a sound-design tool when pushed"),
+      engine (p.getParameters(), ParamIDs::domEngine, "ENGINE",
+              "CLASSIC: DOMINION as it always was. REFINED: fitted to measurements of soothe 3, knob for knob "
+              "(DEPTH as soothe's; DETAIL, ATTACK and RELEASE 10% to each of soothe's steps): gentler in the lows, slower, smoother"),
       stereo (p.getParameters(), ParamIDs::domStereo, "STEREO",
               "L/R works on left and right, M/S on the middle and the sides of the stereo picture"),
       depth (p.getParameters(), ParamIDs::domDepth, "DEPTH", "How much it takes away: more, deeper cuts"),
@@ -559,7 +563,10 @@ DominionPage::DominionPage (ParagonX1AudioProcessor& p)
     addAndMakeVisible (preset);
     addAndMakeVisible (presetLabel);
 
-    for (auto* component : std::initializer_list<juce::Component*> { &onButton, &delta, &back, &mode.box, &mode.label, &stereo.box, &stereo.label })
+    lookahead.setTooltip ("REFINED hears 15 ms ahead, so it catches the start of a resonance (the sound comes out 52 ms late, "
+                          "which the DAW makes up for). Off: no delay, like soothe's low latency mode");
+    for (auto* component : std::initializer_list<juce::Component*> { &onButton, &delta, &lookahead, &back, &mode.box, &mode.label,
+                                                                     &engine.box, &engine.label, &stereo.box, &stereo.label })
         addAndMakeVisible (component);
     for (auto* knob : { &depth, &detail, &attack, &release, &link, &focus, &detailLow, &detailHigh, &attackLow, &attackHigh,
                         &releaseLow, &releaseHigh, &maxCut, &wetTrim, &mix, &out })
@@ -688,8 +695,13 @@ void DominionPage::resized()
     bar.removeFromLeft (14);
     auto modeColumn = bar.removeFromLeft (110);
     mode.label.setBounds (modeColumn.removeFromTop (14));
-    mode.box.setBounds (modeColumn.withSizeKeepingCentre (100, 28));
-    bar.removeFromLeft (18);
+    mode.box.setBounds (modeColumn.removeFromTop (32).withSizeKeepingCentre (100, 28));
+    bar.removeFromLeft (8);
+    auto engineColumn = bar.removeFromLeft (120);
+    engine.label.setBounds (engineColumn.removeFromTop (14));
+    engine.box.setBounds (engineColumn.removeFromTop (32).withSizeKeepingCentre (110, 28));
+    lookahead.setBounds (engineColumn.withSizeKeepingCentre (116, 24));
+    bar.removeFromLeft (12);
     for (auto* knob : { &depth, &detail, &attack, &release })
     {
         place (*knob, bar.removeFromLeft (92));

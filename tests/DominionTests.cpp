@@ -633,3 +633,240 @@ TEST_CASE ("DOMINION presets do what they're for: Vocal Sibilance and Kick Boom"
     CHECK (boom < -3.0);
     CHECK (std::abs (click) < 1.0);
 }
+
+//==============================================================================
+// REFINED (0.25.0): fitted to measurements of soothe 3 (tools/soothe-match).
+namespace
+{
+    dominion::Settings refined()
+    {
+        dominion::Settings s;
+        s.engine = dominion::Engine::refined;
+        s.stereo = dominion::StereoMode::leftRight;
+        s.release = 30.0;   // soothe's 3.0
+        return s;
+    }
+
+    // How much a resonance (a tone `hz` at `toneLevelDb` over pink noise, all `gainDb` louder) is turned down, dB.
+    double cutAt (dominion::Settings settings, double hz, double toneLevelDb = -20.0, double gainDb = 0.0)
+    {
+        Resonant left (toneLevelDb, gainDb, hz), right (toneLevelDb, gainDb, hz);
+        DominionRig rig;
+        settings.on = true;
+        rig.settings = settings;
+        const auto out = rig.play (6.0, [&] (int n) { return left (n); }, [&] (int n) { return right (n); });
+        // With LOOK-AHEAD the sound comes out late: line it up.
+        const auto late = (size_t) rig.processor.getLatencySamples (settings);
+        std::vector<float> aligned (out[0].begin() + (long) late, out[0].end());
+        std::vector<float> input (left.samples.begin(), left.samples.begin() + (long) aligned.size());
+        return toneDb (aligned, hz) - toneDb (input, hz);
+    }
+}
+
+TEST_CASE ("DOMINION REFINED: LOOK-AHEAD makes it exactly 2304 samples late (as soothe 3), and it says so; off, not late", "[dominion][refined]")
+{
+    CHECK (dominion::lookaheadSamples (44100.0) == 2304);
+    CHECK (dominion::lookaheadSamples (48000.0) == 2304);
+    CHECK (dominion::lookaheadSamples (96000.0) == 4704);
+    CHECK (dominion::lookaheadSamples (192000.0) == 9408);
+
+    for (const auto lookahead : { true, false })
+    {
+        DominionRig rig;
+        rig.settings = refined();
+        rig.settings.on = true;
+        rig.settings.depth = 0.0;   // nothing cut: the sound only delayed
+        rig.settings.lookahead = lookahead;
+        const auto late = lookahead ? 2304 : 0;
+        CHECK (rig.processor.getLatencySamples (rig.settings) == late);
+        Pink pink (3);
+        std::vector<float> in;
+        const auto out = rig.play (1.0, [&] (int n) { while ((int) in.size() <= n) in.push_back (pink()); return in[(size_t) n]; },
+                                   [&] (int n) { while ((int) in.size() <= n) in.push_back (pink()); return in[(size_t) n]; });
+        INFO ("look-ahead " << (int) lookahead);
+        // Once the delay has filled and it has faded in (20 ms): the input, exactly, `late` samples on.
+        for (size_t i = (size_t) (0.2 * sampleRate); i < out[0].size(); ++i)
+            REQUIRE_THAT (out[0][i], WithinAbs (in[i - (size_t) late], 1.0e-6));
+    }
+
+    dominion::Settings off = refined();
+    off.on = false;
+    dominion::Processor processor;
+    processor.prepare (sampleRate, 256);
+    CHECK (processor.getLatencySamples (off) == 0);   // switched off: not late at all
+}
+
+TEST_CASE ("DOMINION REFINED: switching on and off doesn't click, and the sound waits for the delay to fill", "[dominion][refined]")
+{
+    DominionRig rig;
+    rig.settings = refined();
+    rig.settings.on = false;
+    const auto tone = sine (1000.0, -6.0);
+    auto out = rig.play (0.2, tone, tone);
+    rig.settings.on = true;
+    const auto on = rig.play (0.5, tone, tone);
+    rig.settings.on = false;
+    const auto off = rig.play (0.3, tone, tone);
+    for (const auto* part : { &on, &off })
+        out[0].insert (out[0].end(), (*part)[0].begin(), (*part)[0].end());
+    // A 1 kHz sine at -6 dB moves at most 0.0655 a sample; a jump would be far more.
+    // (While it fades from the sound as it comes to the delayed sound, the two
+    // add: still smooth, at most twice the step.)
+    float biggest = 0.0f;
+    for (size_t i = 1; i < out[0].size(); ++i)
+        biggest = std::max (biggest, std::abs (out[0][i] - out[0][i - 1]));
+    CHECK (biggest < 0.14f);
+}
+
+TEST_CASE ("DOMINION REFINED, fitted to soothe 3: gentle at its defaults, leaves the lows alone, DEPTH from nothing to heavy", "[dominion][refined]")
+{
+    const auto classic = cutAt ({}, 2500.0), atDefaults = cutAt (refined(), 2500.0);
+    WARN ("A resonance at 2.5 kHz, 12 dB over the noise: CLASSIC " << classic << " dB, REFINED " << atDefaults << " dB");
+    CHECK (atDefaults < -1.0);
+    CHECK (atDefaults > -6.0);
+    CHECK (atDefaults > classic + 2.0);   // gentler than CLASSIC
+
+    // The lows: soothe hardly touches a resonance at 150 Hz at its defaults; CLASSIC does.
+    const auto lowClassic = cutAt ({}, 150.0), lowRefined = cutAt (refined(), 150.0);
+    WARN ("At 150 Hz: CLASSIC " << lowClassic << " dB, REFINED " << lowRefined << " dB");
+    CHECK (lowRefined > -0.6);
+    CHECK (lowClassic < lowRefined - 1.0);
+
+    // DEPTH: 2.5 next to nothing, 10 several times the default (as measured).
+    auto settings = refined();
+    settings.depth = 2.5;
+    const auto gentle = cutAt (settings, 2500.0);
+    settings.depth = 10.0;
+    const auto heavy = cutAt (settings, 2500.0);
+    WARN ("DEPTH 2.5: " << gentle << " dB, 10: " << heavy << " dB");
+    CHECK (gentle > -0.7);
+    CHECK (heavy < 2.5 * atDefaults);
+
+    // SOFT acts the same at any level.
+    CHECK_THAT (cutAt (refined(), 2500.0, -20.0, -24.0), WithinAbs (atDefaults, 1.0));
+}
+
+TEST_CASE ("DOMINION REFINED: more DETAIL, deeper and more selective; less, shallower and broader", "[dominion][refined]")
+{
+    auto settings = refined();
+    settings.detail = 0.0;
+    const auto broad = cutAt (settings, 2500.0);
+    settings.detail = 100.0;
+    const auto narrow = cutAt (settings, 2500.0);
+    WARN ("DETAIL 0: " << broad << " dB, 100: " << narrow << " dB");
+    CHECK (narrow < broad - 2.0);
+}
+
+TEST_CASE ("DOMINION REFINED in PR7-X: the plugin reports its delay to the DAW while it's on", "[dominion][refined][plugin]")
+{
+    ParagonX1AudioProcessor processor;
+    processor.setPlayConfigDetails (2, 2, sampleRate, 256);
+    processor.prepareToPlay (sampleRate, 256);
+    auto& state = processor.getParameters();
+    const auto set = [&state] (const char* id, float value)
+    {
+        auto* p = state.getParameter (id);
+        p->setValueNotifyingHost (p->convertTo0to1 (value));
+    };
+    set (ParamIDs::domEngine, 1.0f);
+    processor.updateLatency();
+    CHECK (processor.getLatencySamples() == 0);   // off
+    set (ParamIDs::domOn, 1.0f);
+    processor.updateLatency();
+    CHECK (processor.getLatencySamples() == 2304);
+    set (ParamIDs::domLookahead, 0.0f);
+    processor.updateLatency();
+    CHECK (processor.getLatencySamples() == 0);
+}
+
+//==============================================================================
+// Hidden (run with "[domfit]"): the fitting harness for REFINED (0.25.0).
+// Renders a WAV through DOMINION for each line of a jobs file:
+//   PARAGON_DOMFIT_IN=test.wav PARAGON_DOMFIT_JOBS=jobs.txt PARAGON_DOMFIT_TUNING=depthScale=1.2,weight3=0.1
+// each line "out.wav key=value ..." with keys engine (classic/refined),
+// mode (soft/hard), depth, detail, attack, release (0 to 100 as the
+// parameters), stereo (lr/ms), link, mix, delta (0/1), lookahead (0/1) and
+// curve (soothe: soothe 3's default curve, 100 Hz low cut, 4 kHz +2.5 bell
+// Q 0.7, 16 kHz high cut; flat: none). Written as 32-bit float.
+TEST_CASE ("DOMINION fitting harness", "[.][domfit]")
+{
+    const auto inPath = juce::SystemStats::getEnvironmentVariable ("PARAGON_DOMFIT_IN", {});
+    const auto jobsPath = juce::SystemStats::getEnvironmentVariable ("PARAGON_DOMFIT_JOBS", {});
+    REQUIRE (inPath.isNotEmpty());
+    REQUIRE (jobsPath.isNotEmpty());
+    for (const auto& pair : juce::StringArray::fromTokens (juce::SystemStats::getEnvironmentVariable ("PARAGON_DOMFIT_TUNING", {}), ",", {}))
+        if (pair.contains ("="))
+            REQUIRE (dominion::refinedTuning().set (pair.upToFirstOccurrenceOf ("=", false, false).trim(),
+                                                    pair.fromFirstOccurrenceOf ("=", false, false).getDoubleValue()));
+
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (juce::File (inPath)));
+    REQUIRE (reader != nullptr);
+    const auto rate = reader->sampleRate;
+    const auto length = (int) reader->lengthInSamples;
+    juce::AudioBuffer<float> source (2, length);
+    reader->read (&source, 0, length, 0, true, true);
+
+    juce::StringArray lines;
+    juce::File (jobsPath).readLines (lines);
+    for (const auto& line : lines)
+    {
+        auto words = juce::StringArray::fromTokens (line, " ", {});
+        words.removeEmptyStrings();
+        if (words.isEmpty())
+            continue;
+        dominion::Settings s;
+        s.on = true;
+        s.engine = dominion::Engine::refined;
+        s.stereo = dominion::StereoMode::leftRight;
+        s.release = 30.0;
+        auto curve = juce::String ("soothe");
+        for (int i = 1; i < words.size(); ++i)
+        {
+            const auto key = words[i].upToFirstOccurrenceOf ("=", false, false);
+            const auto value = words[i].fromFirstOccurrenceOf ("=", false, false);
+            const auto number = value.getDoubleValue();
+            if (key == "engine")         s.engine = value == "classic" ? dominion::Engine::classic : dominion::Engine::refined;
+            else if (key == "mode")      s.mode = value == "hard" ? dominion::Mode::hard : dominion::Mode::soft;
+            else if (key == "depth")     s.depth = number;
+            else if (key == "detail")    s.detail = number;
+            else if (key == "attack")    s.attack = number;
+            else if (key == "release")   s.release = number;
+            else if (key == "stereo")    s.stereo = value == "ms" ? dominion::StereoMode::midSide : dominion::StereoMode::leftRight;
+            else if (key == "link")      s.link = number;
+            else if (key == "mix")       s.mix = number;
+            else if (key == "delta")     s.delta = number > 0.5;
+            else if (key == "lookahead") s.lookahead = number > 0.5;
+            else if (key == "curve")     curve = value;
+            else FAIL ("unknown key " << key);
+        }
+        if (curve == "soothe")
+        {
+            auto& low = s.bands[0];
+            low.used = true; low.shape = dominion::Shape::lowCut; low.frequency = 100.0; low.slope = 3;
+            auto& bell = s.bands[1];
+            bell.used = true; bell.shape = dominion::Shape::bell; bell.frequency = 4000.0; bell.depthDb = 2.5; bell.q = 0.7;
+            auto& high = s.bands[2];
+            high.used = true; high.shape = dominion::Shape::highCut; high.frequency = 16000.0; high.slope = 3;
+        }
+
+        dominion::Processor processor;
+        constexpr int blockSize = 512;
+        processor.prepare (rate, blockSize);
+        juce::AudioBuffer<float> out (2, length);
+        out.makeCopyOf (source);
+        for (int start = 0; start < length; start += blockSize)
+        {
+            juce::dsp::AudioBlock<float> block (out);
+            processor.process (block.getSubBlock ((size_t) start, (size_t) std::min (blockSize, length - start)), s);
+        }
+
+        juce::WavAudioFormat format;
+        const juce::File target (words[0]);
+        target.deleteFile();
+        std::unique_ptr<juce::AudioFormatWriter> writer (format.createWriterFor (new juce::FileOutputStream (target), rate, 2, 32, {}, 0));
+        REQUIRE (writer != nullptr);
+        writer->writeFromAudioSampleBuffer (out, 0, length);
+    }
+}

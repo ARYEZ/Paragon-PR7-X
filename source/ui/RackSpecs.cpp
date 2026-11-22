@@ -246,7 +246,7 @@ std::array<RackUnit::Spec, 6> makeRackSpecs (ParagonX1AudioProcessor& p, RackAct
             const auto h = content.getHeight() * 0.36f;
             drawNumber (g, juce::String (valueOf (p, domDepth), 1), content.getTopLeft(), h);
             column (g, content.withTrimmedTop (h + h * 0.25f),
-                    { "DEPTH   " + textOf (p, domMode).toUpperCase() + " MODE", "CUT -" + juce::String (deepest(), 1) + " dB" }, h * 0.33f);
+                    { "DEPTH   " + textOf (p, domMode).toUpperCase() + (valueOf (p, domEngine) > 0.5f ? " REFINED" : " MODE"), "CUT -" + juce::String (deepest(), 1) + " dB" }, h * 0.33f);
         };
         s.readoutState = [&p]
         {
