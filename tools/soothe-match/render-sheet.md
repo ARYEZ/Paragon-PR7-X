@@ -29,7 +29,8 @@ low latency).
 - Name each file as below (`R01.wav` and so on).
 
 Before each render, **reset soothe to its defaults**: the "Factory default"
-preset (soft, depth 5.0, detail 5.0, attack 5.0, release 3.0, mix 100 %,
+preset (soft, depth 5.0, detail 5.0, attack 5.0, release 3.0, L/R, link 100 %,
+focus even, tilts flat, max cut off, wet trim 0.0 dB, mix 100 %,
 out 0.0 dB, quality normal, low latency off). Then change only what's
 listed. Where a number is given, set it as close as you can and **write
 down the exact number soothe shows**.
@@ -52,8 +53,12 @@ down the exact number soothe shows**.
 | R11 | release **all the way up** (slowest) | release |
 | R12 | **hard** (instead of soft) | — |
 | R13 | **hard**, depth **all the way up** | depth |
-| R14 | side panel, stereo: mode **left/right** (instead of mid/side) | the link % |
-| R15 | side panel, stereo: link **0 %** (mode left as it is) | the mode |
+| R14 | side panel, stereo: **M/S** and link **0 %** | — |
+| R15 | side panel, stereo: link **0 %** (mode stays **L/R**) | — |
+
+(soothe 3's stereo defaults are L/R, link 100 %, focus even. At 100 % link
+the mode hardly matters, since one cut goes on both channels; at 0 % each
+channel is handled on its own, which is where L/R and M/S differ.)
 
 R02 is the most important one after R01. DOMINION has no look-ahead (it
 reacts with zero delay, like soothe's low latency mode), so R02 is the
