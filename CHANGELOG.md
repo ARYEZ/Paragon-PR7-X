@@ -2,6 +2,14 @@
 
 Each version's notes appear on its GitHub Release page.
 
+## 0.24.1
+
+- **AURORA is 10% less bright**, the same change you chose for PR7-B (0.24.3). Full pearl white was too much to look at for long. Now the pearl is drawn at 90% of its old brightness: still clearly a white pearl unit, without the glare. Pure white becomes 230 out of 255.
+  - All of the pearl: the rim, the face and the six panels the rack units sit on, shine and highlights included.
+  - The lettering, the printed red, the badge, the neon rings, the keys, the knobs and the screens keep their own colours, so they stand out a little more against the softer pearl.
+  - **OBSIDIAN is unchanged:** compared pixel by pixel with 0.24.0, not one pixel differs.
+  - Nothing in the sound changes.
+
 ## 0.24.0
 
 - **Two finishes now, with your names:**

@@ -13,6 +13,7 @@
 #include "PluginProcessor.h"
 #include "ui/EqPage.h"
 #include "ui/Finish.h"
+#include "ui/PedalBody.h"
 #include "ui/PerformanceControls.h"
 #include "ui/OraclePage.h"
 #include "ui/MarsPage.h"
@@ -161,6 +162,75 @@ TEST_CASE ("OBSIDIAN and AURORA recolour the unit's printing, and every open win
         CHECK (image.isValid());
     }
     CHECK (rigLevelColour (*first) == Finish::ink());
+}
+
+TEST_CASE ("AURORA's pearl is 10% less bright; OBSIDIAN is unchanged", "[ui]")
+{
+    // The unit's pearl (chassis, face and two section panels) drawn with and
+    // without the dimming: on Aurora every pearl pixel comes out at 90% (to
+    // within rounding), so pure white is about 230; on Obsidian the two are
+    // identical, and so is the whole unit, printing and badge included.
+    PedalBody body;
+    body.setSize (600, 400);   // chassis: 10 px in at the sides and top, 5 at the bottom
+    PedalBody::Geometry geometry;
+    geometry.face = { 40.0f, 40.0f, 520.0f, 320.0f };
+    geometry.sections = { { 60.0f, 160.0f, 480.0f, 80.0f }, { 60.0f, 260.0f, 480.0f, 80.0f } };
+    geometry.badge = { 60.0f, 50.0f, 200.0f, 90.0f };
+    body.setGeometry (geometry);
+
+    const auto draw = [&body] (bool dim)
+    {
+        juce::Image image (juce::Image::ARGB, 600, 400, true, juce::SoftwareImageType());
+        juce::Graphics g (image);
+        g.fillAll (juce::Colours::black);
+        body.paintPearl (g, dim);
+        return image;
+    };
+    const auto brightness = [] (juce::Colour c) { return juce::jmax (c.getRed(), c.getGreen(), c.getBlue()); };
+
+    Finish::set (Finish::Type::aurora, false);
+    body.refinish();
+    const auto bright = draw (false), dimmed = draw (true);
+    int worst = 0, brightest = 0, outsideChanged = 0;
+    const auto chassis = juce::Rectangle<float> (10.0f, 10.0f, 580.0f, 385.0f);
+    juce::Path inside, outside;   // 2 px in from the chassis's edge, and 2 px out (the glow, which isn't pearl)
+    inside.addRoundedRectangle (chassis.reduced (2.0f), 26.0f);
+    outside.addRoundedRectangle (chassis.expanded (2.0f), 30.0f);
+    for (int y = 0; y < 400; ++y)
+        for (int x = 0; x < 600; ++x)
+        {
+            const auto before = bright.getPixelAt (x, y), after = dimmed.getPixelAt (x, y);
+            const auto centre = juce::Point<float> ((float) x + 0.5f, (float) y + 0.5f);
+            if (! outside.contains (centre))
+            {
+                outsideChanged += before != after ? 1 : 0;
+                continue;
+            }
+            if (! inside.contains (centre))
+                continue;
+            for (const auto [b, a] : { std::pair { before.getRed(), after.getRed() }, { before.getGreen(), after.getGreen() }, { before.getBlue(), after.getBlue() } })
+                worst = juce::jmax (worst, std::abs ((int) a - juce::roundToInt ((1.0f - Finish::auroraDimming) * (float) b)));
+            brightest = juce::jmax (brightest, (int) brightness (after));
+        }
+    CHECK (worst <= 1);
+    CHECK (Finish::auroraDimming == 0.10f);
+    CHECK (brightest <= 231);
+    CHECK (brightest >= 215);   // still a white unit, not grey: the brightest pearl near 230
+    CHECK (outsideChanged == 0);  // the glow round it is left alone
+    CHECK (Finish::pearl (juce::Colours::white) == juce::Colour (230, 230, 230));
+    CHECK (Finish::stampEdge() == juce::Colour (230, 230, 230).withAlpha (0.7f));
+
+    Finish::set (Finish::Type::obsidian, false);
+    body.refinish();
+    const auto blackPlain = draw (false), blackDimmed = draw (true);
+    int blackDifference = 0;
+    for (int y = 0; y < 400; ++y)
+        for (int x = 0; x < 600; ++x)
+            if (blackPlain.getPixelAt (x, y) != blackDimmed.getPixelAt (x, y))
+                ++blackDifference;
+    CHECK (blackDifference == 0);
+    CHECK (Finish::pearl (juce::Colours::white) == juce::Colours::white);
+    CHECK (Finish::stampEdge() == juce::Colours::black.withAlpha (0.75f));
 }
 
 TEST_CASE ("The chain's blocks open their stomps' pages; there's no dock under the unit (from 0.17.0)", "[ui]")
