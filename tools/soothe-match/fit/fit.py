@@ -24,6 +24,10 @@ STAGES = {
                  keep=STATIC),
   "hard": dict(params={"hard5": (-80, 0), "hardStep": (0, 15), "hardCurve": (0, 3), "hardSlope": (0.05, 2), "hardFlat": (0, 1), "hardTilt": (-3, 8), "hardKnee": (1, 60)},
                cases=["R12", "R13", "R21", "R22"], keep=STATIC),
+  "joint": dict(params={"depthScale": (0.05, 3), "overPower": (0.2, 1.5), "marginDepth": (-1, 4), "margin0": (-6, 12), "margin100": (-6, 15),
+                         "window0": (0.3, 3), "window100": (0.15, 2), "cycles": (4, 60), "knee": (0.5, 20),
+                         "width50": (0.05, 1.5), **{f"weight{i}": (0, 3) for i in range(3, 10)}},
+                 cases=["R01", "R27", "R03", "R04", "R05", "R06", "R07", "R17", "R18"], keep=STATIC, real=True),
   "all": dict(params=None, cases=[c for c in F.CASES if c != "R23"], keep=lambda k: True),
 }
 
@@ -32,7 +36,7 @@ def run(stage, iters):
     defaults = dict(depthStart=2.2, depthPower=1.3, depthScale=1.0, margin0=3, margin100=1, knee=4, width0=1.2, width50=0.4, width100=0.1,
                     window0=1.0, window100=0.33, attack0=2, attack50=10, attack100=30, release0=10, release50=40, release100=300,
                     detailAttack0=0.5, detailAttack100=2, detailRelease0=1.6, detailRelease100=0.6, hard5=-38, hardStep=3, hardSlope=0.3, hardTilt=1.5,
-                    leadMs=15, marginDepth=0, overPower=1, hardCurve=0, hardFlat=0, hardKnee=4, hardAttack=1, hardRelease=1, detailScale0=1, detailScale100=1, attack25=5, **{f"weight{i}": w for i, w in enumerate([0, 0, 0, .05, .15, .3, .6, 1, .8, .5])})
+                    leadMs=15, cycles=16, marginDepth=0, overPower=1, hardCurve=0, hardFlat=0, hardKnee=4, hardAttack=1, hardRelease=1, detailScale0=1, detailScale100=1, attack25=5, **{f"weight{i}": w for i, w in enumerate([0, 0, 0, .05, .15, .3, .6, 1, .8, .5])})
     x0 = np.array([tuning.get(n, defaults[n]) for n in names])
     # Work in 0..1 (log for positive ranges) so every number moves alike.
     logs = (lo > 0)
@@ -45,6 +49,8 @@ def run(stage, iters):
         _, per, _ = F.loss(st["cases"], t, f"{HERE}/w_{stage}")
         for n, (e, d) in per.items():
             total += sum(v * v for k, v in d.items() if st["keep"](k))
+        if st.get("real"):
+            total += F.real_loss(t, f"{HERE}/w_{stage}_real")[0]
         count[0] += 1
         if best[0] is None or total < best[0]:
             best[0], best[1] = total, t

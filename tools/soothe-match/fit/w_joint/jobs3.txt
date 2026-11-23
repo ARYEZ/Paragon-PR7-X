@@ -1,0 +1,2 @@
+/home/user/Paragon-PR7-E/tools/soothe-match/fit/w_joint/R04.wav depth=7.5
+/home/user/Paragon-PR7-E/tools/soothe-match/fit/w_joint/R17.wav detail=25

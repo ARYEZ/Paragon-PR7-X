@@ -1,0 +1,2 @@
+/home/user/Paragon-PR7-E/tools/soothe-match/fit/w_joint_real/guitars_default.wav 
+/home/user/Paragon-PR7-E/tools/soothe-match/fit/w_joint_real/guitars_depth75.wav depth=7.5

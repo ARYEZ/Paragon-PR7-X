@@ -94,3 +94,49 @@ def loss(names, tuning, workdir, verbose=False):
             e, d = per[n]; worst = sorted(d.items(), key=lambda kv: -abs(kv[1]))[:5]
             print(f"{n} {e:8.1f}  " + "  ".join(f"{k}:{v:+.1f}" for k, v in worst))
     return total, per, results
+
+# Real material (0.25.1): a dry track and soothe's renders of it, compared by
+# the long-term change in each third octave and the change moment by moment.
+# REAL lists (name, dry, soothe render, DOMINION settings); the files live in SOOTHE_DIR/song/in.
+REAL = [("guitars_default", "guitars_dry.wav", "guitars_soothe_default.wav", ""),
+        ("guitars_depth75", "guitars_dry.wav", "guitars_soothe_depth75.wav", "depth=7.5")]
+CENTRES = 25 * 2 ** (np.arange(0, 29) / 3)
+
+def _bandpowers(x, frame=4096, hop=2048):
+    w = np.hanning(frame); f = np.fft.rfftfreq(frame, 1 / SR); m = x.mean(1)
+    S = np.array([np.abs(np.fft.rfft(m[i:i + frame] * w)) ** 2 for i in range(0, len(m) - frame, hop)])
+    out = np.zeros((len(S), len(CENTRES)))
+    for j, c in enumerate(CENTRES):
+        sel = (f >= c / 2 ** (1 / 6)) & (f < c * 2 ** (1 / 6)); out[:, j] = S[:, sel].sum(1) + 1e-20
+    return out
+
+_real = {}
+def _real_reference(dry_name, wet_name):
+    key = (dry_name, wet_name)
+    if key not in _real:
+        dry = M.load(f"{S}/song/in/{dry_name}", SR); wet, _ = M.align(dry, M.load(f"{S}/song/in/{wet_name}", SR), SR)
+        _real[key] = (_bandpowers(dry), _bandpowers(wet))
+    return _real[key]
+
+REAL_BANDS = (CENTRES >= 100) & (CENTRES <= 6500)
+def real_loss(tuning, workdir):
+    # Squared differences: the long-term change per third octave (100 Hz to 6.4 kHz), x3, and the moment-by-moment average difference, x3.
+    os.makedirs(workdir, exist_ok=True); total = 0.0; parts = {}
+    tun = ",".join(f"{k}={v:.6g}" for k, v in tuning.items())
+    jobs = f"{workdir}/real_jobs.txt"
+    open(jobs, "w").write("\n".join(f"{workdir}/{n}.wav {settings}" for n, _, _, settings in REAL) + "\n")
+    env = dict(os.environ, PARAGON_DOMFIT_IN=f"{S}/song/in/{REAL[0][1]}", PARAGON_DOMFIT_JOBS=jobs, PARAGON_DOMFIT_TUNING=tun)
+    p = subprocess.run([BIN, "[domfit]"], env=env, capture_output=True, text=True)
+    if p.returncode != 0: raise RuntimeError(p.stdout[-2000:])
+    for n, dry_name, wet_name, _ in REAL:
+        B0, Bs = _real_reference(dry_name, wet_name)
+        dry = M.load(f"{S}/song/in/{dry_name}", SR); dom, _ = M.align(dry, M.load(f"{workdir}/{n}.wav", SR), SR)
+        Bd = _bandpowers(dom); loud = B0.sum(1) > np.percentile(B0.sum(1), 20)
+        cs = 10 * np.log10(Bs[loud].sum(0) / B0[loud].sum(0)); cd = 10 * np.log10(Bd[loud].sum(0) / B0[loud].sum(0))
+        long_term = (cd - cs)[REAL_BANDS]
+        ts = 10 * np.log10(Bs / B0); td = 10 * np.log10(Bd / B0); w = B0 / B0.sum(1, keepdims=True)
+        valid = loud[:, None] & (B0 > B0.max() * 1e-7) & REAL_BANDS[None, :]
+        moment = np.sum(np.abs(ts - td)[valid] * w[valid]) / np.sum(w[valid])
+        e = 3 * np.sum(long_term ** 2) + 3 * moment ** 2
+        parts[n] = (e, dict(zip([f"{c:.0f}" for c in CENTRES[REAL_BANDS]], long_term), moment=moment)); total += e
+    return total, parts
