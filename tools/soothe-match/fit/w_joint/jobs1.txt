@@ -1,2 +1,0 @@
-/home/user/Paragon-PR7-E/tools/soothe-match/fit/w_joint/R27.wav curve=flat
-/home/user/Paragon-PR7-E/tools/soothe-match/fit/w_joint/R06.wav detail=0

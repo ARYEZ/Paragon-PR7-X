@@ -46,11 +46,11 @@ def run(stage, iters):
     def f(u):
         x = from01(u); t = dict(tuning); t.update(dict(zip(names, x)))
         total = 0.0
-        _, per, _ = F.loss(st["cases"], t, f"{HERE}/w_{stage}")
+        _, per, _ = F.loss(st["cases"], t, f"{F.S}/w_{stage}")
         for n, (e, d) in per.items():
             total += sum(v * v for k, v in d.items() if st["keep"](k))
         if st.get("real"):
-            total += F.real_loss(t, f"{HERE}/w_{stage}_real")[0]
+            total += F.real_loss(t, f"{F.S}/w_{stage}_real")[0]
         count[0] += 1
         if best[0] is None or total < best[0]:
             best[0], best[1] = total, t
