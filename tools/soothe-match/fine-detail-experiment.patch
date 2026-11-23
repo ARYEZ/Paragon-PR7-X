@@ -1,0 +1,682 @@
+diff --git a/source/dsp/dominion/Dominion.cpp b/source/dsp/dominion/Dominion.cpp
+index 6332fcf..a7257ed 100644
+--- a/source/dsp/dominion/Dominion.cpp
++++ b/source/dsp/dominion/Dominion.cpp
+@@ -98,6 +98,16 @@ namespace dominion
+         return tuning;
+     }
+ 
++    Tuning& fineTuning()
++    {
++        static Tuning tuning = []
++        {
++            Tuning t;   // fitted in 0.26.0: see Dominion.h
++            return t;
++        }();
++        return tuning;
++    }
++
+     bool Tuning::set (const juce::String& name, double value)
+     {
+         const std::pair<const char*, double*> named[] = {
+@@ -113,7 +123,8 @@ namespace dominion
+             { "detailRelease0", &detailRelease0 }, { "detailRelease100", &detailRelease100 },
+             { "hard5", &hard5 }, { "hardStep", &hardStep }, { "hardSlope", &hardSlope }, { "hardTilt", &hardTilt },
+             { "hardCurve", &hardCurve }, { "hardFlat", &hardFlat }, { "hardKnee", &hardKnee },
+-            { "cycles", &cycles }, { "leadMs", &leadMs } };
++            { "cycles", &cycles }, { "leadMs", &leadMs }, { "levelMs", &levelMs }, { "nearOct", &nearOct },
++            { "frameSize", &frameSize }, { "binSmooth", &binSmooth }, { "quietStart", &quietStart }, { "quietRange", &quietRange } };
+         for (const auto& [n, target] : named)
+             if (name == n)
+             {
+@@ -185,12 +196,11 @@ namespace dominion
+         dry.setSize (2, maxBlockSize);
+         work.setSize (2, maxBlockSize);
+         input.setSize (2, maxBlockSize);
+-        heard.setSize (2, subBlock);
+         latency = lookaheadSamples (sampleRate);
+         ahead.setSize (2, latency + 1);
+-        queued.assign ((size_t) (latency / subBlock + 2), {});
+         delayedFade.reset (sampleRate, 0.02);
+         primed = false;
++        prepareFine();
+         bypass.prepare (sampleRate, maxBlockSize);
+         for (auto* smoothed : { &mix, &wetTrim, &out })
+             smoothed->reset (sampleRate, 0.02);
+@@ -208,13 +218,10 @@ namespace dominion
+         cutStates = {};
+         listenStates = {};
+         listening = -1;
+-        applied = {};
+-        for (auto& q : queued)
+-            q = {};
+-        queueAt = 0;
+         ahead.clear();
+         aheadAt = 0;
+         warm = 0;
++        resetFine();
+         for (auto& channel : shown)
+             for (auto& value : channel)
+                 value.store (0.0f);
+@@ -300,6 +307,8 @@ namespace dominion
+                 value = (float) (1.0 / (1.0 + d * d));
+             }
+ 
++        if (refined)
++            updateFineShape (s);
+         shapedFor = s;
+         shaped = true;
+         smoothedFor = -1.0;   // the timing changed: its steps are worked out again
+@@ -313,6 +322,7 @@ namespace dominion
+             for (int k = 0; k < numFilters; ++k)
+                 curve[(size_t) channel][(size_t) k] = focus * std::pow (10.0, depthCurveDb (s, frequencies[(size_t) k], channel, sampleRate) / 20.0);
+         }
++        updateFineCurve();
+         curvedFor = s;
+         curved = true;
+     }
+@@ -547,7 +557,7 @@ namespace dominion
+             {
+                 for (int c = 0; c < numChannels; ++c)
+                     dry.copyFrom (c, 0, wet.getChannelPointer ((size_t) c), numSamples);
+-                cutBlock (wet, nullptr, s, false);
++                cutBlock (wet, s);
+                 blend (wet, s);
+             });
+         }
+@@ -563,8 +573,6 @@ namespace dominion
+     {
+         const auto numChannels = (int) block.getNumChannels();
+         const auto numSamples = (int) block.getNumSamples();
+-        lagBlocks = juce::jlimit (0, (int) queued.size() - 1,
+-                                  (int) std::lround ((latency - refinedTuning().leadMs * 0.001 * sampleRate) / subBlock));
+ 
+         // The sound as it comes (heard now), and as it was `latency` samples
+         // ago (cut now, and the dry for MIX and DELTA).
+@@ -584,8 +592,11 @@ namespace dominion
+         for (int c = 0; c < numChannels; ++c)
+             dry.copyFrom (c, 0, block.getChannelPointer ((size_t) c), numSamples);
+ 
+-        cutBlock (block, &input, s, true);
++        fineProcess (input, block, s);   // the cut, in fine detail, as late as the dry
+         blend (block, s);
++        for (int c = 0; c < 2; ++c)
++            for (int k = 0; k < numFilters; ++k)
++                reduction[(size_t) c][(size_t) k] = c < numChannels ? fineCutNear (c, frequencies[(size_t) k]) : 0.0;
+ 
+         // In once the delay has filled (until then the sound passes as it
+         // comes), out when switched off; 20 ms fades.
+@@ -600,7 +611,7 @@ namespace dominion
+             }
+     }
+ 
+-    void Processor::cutBlock (juce::dsp::AudioBlock<float> wet, const juce::AudioBuffer<float>* listen, const Settings& s, bool delayed) noexcept
++    void Processor::cutBlock (juce::dsp::AudioBlock<float> wet, const Settings& s) noexcept
+     {
+         const auto numChannels = (int) juce::jmin ((size_t) 2, wet.getNumChannels());
+         const auto numSamples = (int) wet.getNumSamples();
+@@ -619,23 +630,11 @@ namespace dominion
+                     work.setSample (1, i, midSide ? 0.5f * (l - r) : r);
+             }
+ 
+-            // With LOOK-AHEAD, listening to the sound as it comes in
+-            // (`listen`) while cutting it as it was (the block).
+-            if (listen != nullptr)
+-                for (int i = 0; i < count; ++i)
+-                {
+-                    const auto l = listen->getSample (0, start + i);
+-                    const auto r = numChannels > 1 ? listen->getSample (1, start + i) : l;
+-                    heard.setSample (0, i, midSide ? 0.5f * (l + r) : l);
+-                    if (numChannels > 1)
+-                        heard.setSample (1, i, midSide ? 0.5f * (l - r) : r);
+-                }
+-
+             // Listen: each sample through every band pass at once (they
+             // don't depend on each other). b1 is 0, so z1 is z2 - a1 y.
+             for (int c = 0; c < numChannels; ++c)
+             {
+-                const auto* x = (listen != nullptr ? heard : work).getReadPointer (c);
++                const auto* x = work.getReadPointer (c);
+                 auto* z1 = detectorZ1[(size_t) c].data();
+                 auto* z2 = detectorZ2[(size_t) c].data();
+                 auto* p = power[(size_t) c].data();
+@@ -658,18 +657,6 @@ namespace dominion
+             }
+             computeTargets (s, numChannels, count / sampleRate);
+ 
+-            // With LOOK-AHEAD, the gains heard `lagBlocks` sub-blocks ago
+-            // (the cut sees `leadMs` ahead of the sound it cuts).
+-            auto* use = &gains;
+-            if (delayed && lagBlocks > 0)
+-            {
+-                const auto size = (int) queued.size();
+-                queued[(size_t) queueAt] = gains;
+-                applied = queued[(size_t) ((queueAt - lagBlocks + size) % size)];
+-                queueAt = (queueAt + 1) % size;
+-                use = &applied;
+-            }
+-
+             // Cut: each bell, redesigned for its gain, in series.
+             for (int c = 0; c < numChannels; ++c)
+             {
+@@ -677,7 +664,7 @@ namespace dominion
+                 int numActive = 0;
+                 for (int k = 0; k < numFilters; ++k)
+                 {
+-                    auto& gain = (*use)[(size_t) c][(size_t) k];
++                    auto& gain = gains[(size_t) c][(size_t) k];
+                     auto& state = cutStates[(size_t) c][(size_t) k];
+                     if (gain < 0.002)
+                     {
+@@ -765,4 +752,289 @@ namespace dominion
+             }
+         }
+     }
++
++    //==========================================================================
++    // REFINED with LOOK-AHEAD, in fine detail (0.26.0). soothe 3 cuts single
++    // harmonics of a guitar chord (its cut ripples with them); a bank of
++    // 1/6-octave filters can't hear them apart, so here the sound goes through
++    // an FFT (2048 points at 44.1/48 kHz: a bin every 21.5 Hz), each bin is
++    // judged against the bins around it, and the cut is made on the spectrum,
++    // all inside the delay REFINED already has. Our own design.
++    void Processor::prepareFine()
++    {
++        const auto base = fineTuning().frameSize < 1536.0 ? 10 : 11;   // 1024 or 2048 points at 44.1/48 kHz
++        fftOrder = base + (latency <= 2304 ? 0 : latency <= 4704 ? 1 : 2);
++        fftSize = 1 << fftOrder;
++        hop = fftSize / 8;
++        numBins = fftSize / 2 + 1;
++        fft = std::make_unique<juce::dsp::FFT> (fftOrder);
++        fftWindow.resize ((size_t) fftSize);
++        for (int n = 0; n < fftSize; ++n)   // sqrt of a periodic Hann: in and out, 8 to a frame, they add up to 4
++            fftWindow[(size_t) n] = (float) std::sqrt (0.5 - 0.5 * std::cos (2.0 * pi * n / fftSize));
++        fftWork.assign ((size_t) (2 * fftSize), 0.0f);
++        for (int c = 0; c < 2; ++c)
++        {
++            fftIn[(size_t) c].assign ((size_t) fftSize, 0.0f);
++            fftOut[(size_t) c].assign ((size_t) (2 * (latency + fftSize)), 0.0f);
++            spectrum[(size_t) c].assign ((size_t) (2 * fftSize), 0.0f);
++            for (auto* v : { &binCurve[(size_t) c], &binLevel[(size_t) c], &binCut[(size_t) c], &binTarget[(size_t) c] })
++                v->assign ((size_t) numBins, 0.0);
++        }
++        for (auto* v : { &binHz, &binWeight, &binMargin, &binScale, &binAttack, &binRelease, &binSpread, &scratch })
++            v->assign ((size_t) numBins, 0.0);
++        prefix.assign ((size_t) numBins + 1, 0.0);
++        bandPrefix.assign ((size_t) numBins + 1, 0.0);
++        binQuiet.assign ((size_t) numBins, 1.0);
++        for (auto* v : { &binFrom, &binTo, &binNearFrom, &binNearTo, &binBandFrom, &binBandTo })
++            v->assign ((size_t) numBins, 0);
++        for (int k = 0; k < numBins; ++k)
++            binHz[(size_t) k] = k * sampleRate / fftSize;
++        resetFine();
++    }
++
++    void Processor::resetFine() noexcept
++    {
++        for (int c = 0; c < 2; ++c)
++        {
++            std::fill (fftIn[(size_t) c].begin(), fftIn[(size_t) c].end(), 0.0f);
++            std::fill (fftOut[(size_t) c].begin(), fftOut[(size_t) c].end(), 0.0f);
++            std::fill (binLevel[(size_t) c].begin(), binLevel[(size_t) c].end(), 0.0);
++            std::fill (binCut[(size_t) c].begin(), binCut[(size_t) c].end(), 0.0);
++        }
++        inAt = sinceHop = 0;
++        outAt = 0;
++    }
++
++    void Processor::updateFineShape (const Settings& s)
++    {
++        const auto& t = fineTuning();
++        const auto seconds = (double) hop / sampleRate;
++        const auto ln2 = std::log (2.0);
++        for (int k = 1; k < numBins; ++k)
++        {
++            const auto hz = binHz[(size_t) k];
++            const auto low = lowWeight (hz), high = highWeight (hz);
++            const auto detail = juce::jlimit (0.0, 100.0, s.detail + 0.5 * (s.detailTiltLow * low + s.detailTiltHigh * high));
++            binMargin[(size_t) k] = juce::jmap (detail / 100.0, t.margin0, t.margin100);
++            binScale[(size_t) k] = between3 (detail, t.detailScale0, 1.0, t.detailScale100);
++            const auto at = juce::jlimit (0.0, (double) t.weight.size() - 1.0, std::log2 (std::max (hz, 1.0) / 25.0));
++            const auto i = std::min ((int) at, (int) t.weight.size() - 2);
++            binWeight[(size_t) k] = std::max (0.0, t.weight[(size_t) i] + (t.weight[(size_t) i + 1] - t.weight[(size_t) i]) * (at - i));
++
++            // SOFT's neighbourhood (octaves either side, by DETAIL), less the nearest bins; HARD's 1/6 octave.
++            const auto window = juce::jmap (detail / 100.0, t.window0, t.window100);
++            const auto from = std::max (1, (int) std::floor (k * std::pow (2.0, -window)));
++            const auto to = std::min (numBins - 1, (int) std::ceil (k * std::pow (2.0, window)));
++            binFrom[(size_t) k] = from;
++            binTo[(size_t) k] = to;
++            binNearFrom[(size_t) k] = juce::jlimit (from, k, std::min (k - 1, (int) std::floor (k * std::pow (2.0, -t.nearOct))));
++            binNearTo[(size_t) k] = juce::jlimit (k, to, std::max (k + 1, (int) std::ceil (k * std::pow (2.0, t.nearOct))));
++            binBandFrom[(size_t) k] = std::max (1, std::min (k, (int) std::floor (k * std::pow (2.0, -1.0 / 12.0))));
++            binBandTo[(size_t) k] = std::min (numBins - 1, std::max (k, (int) std::ceil (k * std::pow (2.0, 1.0 / 12.0))));
++
++            // How far a cut spreads across frequencies: an exponential either side, `width` octaves to 1/e.
++            const auto spreadBins = between3 (detail, t.width0, t.width50, t.width100) * k * ln2;
++            binSpread[(size_t) k] = std::exp (-1.0 / std::max (spreadBins, 1.0e-3));
++
++            const auto hard = s.mode == Mode::hard;
++            const auto byFrequency = std::pow (1000.0 / std::max (hz, 10.0), t.timingPower);
++            const auto attackTilt = std::pow (4.0, (s.attackTiltLow * low + s.attackTiltHigh * high) / 100.0);
++            const auto releaseTilt = std::pow (4.0, (s.releaseTiltLow * low + s.releaseTiltHigh * high) / 100.0);
++            const auto attack = juce::jlimit (0.0002, 2.0, 0.001 * between4 (s.attack, t.attack0, t.attack25, t.attack50, t.attack100)
++                                                          * between3 (detail, t.detailAttack0, 1.0, t.detailAttack100) * byFrequency * attackTilt
++                                                          * (hard ? t.hardAttack : 1.0));
++            const auto release = juce::jlimit (0.002, 6.0, 0.001 * between3 (s.release, t.release0, t.release50, t.release100)
++                                                           * between3 (detail, t.detailRelease0, 1.0, t.detailRelease100) * byFrequency * releaseTilt
++                                                           * (hard ? t.hardRelease : 1.0));
++            binAttack[(size_t) k] = 1.0 - std::exp (-seconds / attack);
++            binRelease[(size_t) k] = 1.0 - std::exp (-seconds / release);
++        }
++    }
++
++    void Processor::updateFineCurve()
++    {
++        // The depth curve at each bin, between the filters' (an octave is 12 of them).
++        for (int c = 0; c < 2; ++c)
++            for (int k = 0; k < numBins; ++k)
++            {
++                const auto at = juce::jlimit (0.0, (double) numFilters - 1.0, std::log2 (std::max (binHz[(size_t) k], 20.0) / 20.0) / spacingOctaves);
++                const auto i = std::min ((int) at, numFilters - 2);
++                const auto& f = curve[(size_t) c];
++                binCurve[(size_t) c][(size_t) k] = f[(size_t) i] + (f[(size_t) i + 1] - f[(size_t) i]) * (at - i);
++            }
++    }
++
++    void Processor::fineProcess (const juce::AudioBuffer<float>& in, juce::dsp::AudioBlock<float> out, const Settings& s) noexcept
++    {
++        const auto numChannels = (int) juce::jmin ((size_t) 2, out.getNumChannels());
++        const auto numSamples = (int) out.getNumSamples();
++        const auto midSide = s.stereo == StereoMode::midSide && numChannels == 2;
++        const auto size = (long long) fftOut[0].size();
++        for (int i = 0; i < numSamples; ++i)
++        {
++            const auto l = in.getSample (0, i);
++            const auto r = numChannels > 1 ? in.getSample (1, i) : l;
++            fftIn[0][(size_t) inAt] = midSide ? 0.5f * (l + r) : l;
++            fftIn[1][(size_t) inAt] = midSide ? 0.5f * (l - r) : r;
++            inAt = (inAt + 1) % fftSize;
++            if (++sinceHop == hop)
++            {
++                sinceHop = 0;
++                fineFrame (s, numChannels);
++            }
++            // Out: the sound `latency` samples ago, every frame over it now added in.
++            const auto at = (size_t) (((outAt - latency) % size + size) % size);
++            const auto a = fftOut[0][at], b = fftOut[1][at];
++            fftOut[0][at] = fftOut[1][at] = 0.0f;
++            out.setSample (0, i, midSide ? a + b : a);
++            if (numChannels > 1)
++                out.setSample (1, i, midSide ? a - b : b);
++            ++outAt;
++        }
++    }
++
++    void Processor::fineFrame (const Settings& s, int numChannels) noexcept
++    {
++        const auto& t = fineTuning();
++        const auto bins = (size_t) numBins;
++        // Each channel's spectrum, and each bin's power, smoothed.
++        const auto smoothing = 1.0 - std::exp (-(double) hop / (sampleRate * std::max (1.0e-4, t.levelMs * 0.001)));
++        for (int c = 0; c < numChannels; ++c)
++        {
++            for (int n = 0; n < fftSize; ++n)
++                fftWork[(size_t) n] = fftIn[(size_t) c][(size_t) ((inAt + n) % fftSize)] * fftWindow[(size_t) n];
++            std::fill (fftWork.begin() + fftSize, fftWork.end(), 0.0f);
++            fft->performRealOnlyForwardTransform (fftWork.data(), true);
++            std::copy (fftWork.begin(), fftWork.end(), spectrum[(size_t) c].begin());
++            auto& level = binLevel[(size_t) c];
++            for (size_t k = 0; k < bins; ++k)
++            {
++                const auto re = (double) fftWork[2 * k], im = (double) fftWork[2 * k + 1];
++                level[k] += smoothing * (re * re + im * im - level[k]);
++            }
++        }
++
++        // In dB, with LINK part of the way to both channels together.
++        auto loudest = -400.0;
++        for (size_t k = 1; k < bins; ++k)
++        {
++            const auto both = 10.0 * std::log10 (binLevel[0][k] + (numChannels > 1 ? binLevel[1][k] : binLevel[0][k]) + 1.0e-30);
++            for (int c = 0; c < numChannels; ++c)
++            {
++                const auto own = 10.0 * std::log10 (2.0 * binLevel[(size_t) c][k] + 1.0e-30);
++                const auto linked = numChannels > 1 ? own + (both - own) * s.link / 100.0 : own;
++                binTarget[(size_t) c][k] = linked;   // the level for now; the target below
++                loudest = std::max (loudest, linked);
++            }
++        }
++
++        const auto depth = juce::jlimit (0.0, 20.0, s.depth);
++        const auto scale = t.depthScale * std::pow (std::max (0.0, depth - t.depthStart) / (5.0 - t.depthStart), t.depthPower);
++        const auto margin = t.marginDepth * (depth - 5.0);
++        const auto hardLevel = t.hard5 - t.hardStep * (depth - 5.0) - t.hardCurve * (depth - 5.0) * std::abs (depth - 5.0);
++        const auto maxCut = juce::jlimit (0.0, maxReductionDb, s.maxCutDb);
++        const auto inverseScale = 0.25f;   // the windows' overlap (JUCE's inverse FFT is already scaled)
++        const auto size = (long long) fftOut[0].size();
++        const auto smoothBins = juce::jlimit (0, 8, juce::roundToInt (t.binSmooth));
++        for (int c = 0; c < numChannels; ++c)
++        {
++            auto& e = binTarget[(size_t) c];
++            if (s.mode == Mode::soft && t.quietStart < 150.0)
++            {
++                // How far each 1/6 octave is under the loudest one (as power per octave), and so how much SOFT may cut there.
++                bandPrefix[0] = 0.0;
++                for (size_t k = 0; k < bins; ++k)
++                    bandPrefix[k + 1] = bandPrefix[k] + (k == 0 ? 0.0 : std::pow (10.0, e[k] / 10.0));
++                auto loudestBand = -400.0;
++                for (size_t k = 1; k < bins; ++k)
++                {
++                    binQuiet[k] = 10.0 * std::log10 (bandPrefix[(size_t) binBandTo[k] + 1] - bandPrefix[(size_t) binBandFrom[k]] + 1.0e-30);
++                    if (binHz[k] >= 50.0 && binHz[k] <= 16000.0)
++                        loudestBand = std::max (loudestBand, binQuiet[k]);
++                }
++                for (size_t k = 1; k < bins; ++k)
++                    binQuiet[k] = juce::jlimit (0.0, 1.0, 1.0 + std::min (0.0, binQuiet[k] - loudestBand + t.quietStart) / std::max (1.0, t.quietRange));
++            }
++            else
++            {
++                std::fill (binQuiet.begin(), binQuiet.end(), 1.0);
++            }
++            if (smoothBins > 0 && s.mode == Mode::soft)
++            {
++                // Each bin's level (as power) averaged with its neighbours, back in dB.
++                prefix[0] = 0.0;
++                for (size_t k = 0; k < bins; ++k)
++                    prefix[k + 1] = prefix[k] + (k == 0 ? 0.0 : std::pow (10.0, e[k] / 10.0));
++                for (size_t k = 1; k < bins; ++k)
++                {
++                    const auto from = std::max ((size_t) 1, k - (size_t) std::min ((int) k - 1, smoothBins)), to = std::min (bins - 1, k + (size_t) smoothBins);
++                    scratch[k] = 10.0 * std::log10 ((prefix[to + 1] - prefix[from]) / (double) (to - from + 1) + 1.0e-30);
++                }
++                for (size_t k = 1; k < bins; ++k)
++                    e[k] = scratch[k];
++            }
++            // Running sums: of the levels in dB (SOFT), or of the powers (HARD).
++            prefix[0] = 0.0;
++            for (size_t k = 0; k < bins; ++k)
++                prefix[k + 1] = prefix[k] + (k == 0 ? 0.0 : s.mode == Mode::soft ? e[k] : std::pow (10.0, e[k] / 10.0));
++            for (size_t k = 1; k < bins; ++k)
++            {
++                double target = 0.0;
++                if (binHz[k] >= 20.0 && e[k] > loudest - floorBelowLoudestDb)
++                {
++                    if (s.mode == Mode::soft)
++                    {
++                        const auto from = (size_t) binFrom[k], to = (size_t) binTo[k], nearFrom = (size_t) binNearFrom[k], nearTo = (size_t) binNearTo[k];
++                        const auto count = (double) ((to - from + 1) - (nearTo - nearFrom + 1));
++                        const auto around = count > 0 ? ((prefix[to + 1] - prefix[from]) - (prefix[nearTo + 1] - prefix[nearFrom])) / count : e[k];
++                        target = scale * binScale[k] * binWeight[k] * binQuiet[k] * std::pow (kneeOver (e[k] - around - binMargin[k] + margin, t.knee), t.overPower);
++                    }
++                    else
++                    {
++                        const auto band = 10.0 * std::log10 (prefix[(size_t) binBandTo[k] + 1] - prefix[(size_t) binBandFrom[k]] + 1.0e-30);
++                        const auto tilted = band + t.hardTilt * std::log2 (binHz[k] / 1000.0);
++                        target = t.hardSlope * (t.hardFlat + (1.0 - t.hardFlat) * binWeight[k]) * kneeOver (tilted - hardLevel, t.hardKnee);
++                    }
++                }
++                scratch[k] = std::min (target * binCurve[(size_t) c][k], maxCut);
++            }
++            scratch[0] = 0.0;
++
++            // Spread across frequencies (an exponential either side), then smoothed in time.
++            for (size_t k = 1; k < bins; ++k)
++                scratch[k] += binSpread[k] * (scratch[k - 1] - scratch[k]);
++            for (size_t k = bins - 1; k-- > 1;)
++                scratch[k] += binSpread[k] * (scratch[k + 1] - scratch[k]);
++            auto& cut = binCut[(size_t) c];
++            for (size_t k = 1; k < bins; ++k)
++                cut[k] += (scratch[k] - cut[k]) * (scratch[k] > cut[k] ? binAttack[k] : binRelease[k]);
++
++            // The cut on the spectrum, back to sound, overlapped and added in.
++            auto* x = spectrum[(size_t) c].data();
++            for (size_t k = 0; k < bins; ++k)
++            {
++                const auto g = (float) std::exp (-cut[k] * (std::log (10.0) / 20.0));
++                x[2 * k] *= g;
++                x[2 * k + 1] *= g;
++            }
++            std::copy (spectrum[(size_t) c].begin(), spectrum[(size_t) c].end(), fftWork.begin());
++            fft->performRealOnlyInverseTransform (fftWork.data());
++            auto& o = fftOut[(size_t) c];
++            const auto start = outAt - fftSize + 1;   // this frame's first sample's time
++            for (int n = 0; n < fftSize; ++n)
++                o[(size_t) (((start + n) % size + size) % size)] += fftWork[(size_t) n] * fftWindow[(size_t) n] * inverseScale;
++        }
++    }
++
++    double Processor::fineCutNear (int channel, double hz) const noexcept
++    {
++        // The deepest cut within a 1/24 octave of `hz`, for the display.
++        const auto binWidth = sampleRate / fftSize;
++        const auto from = std::max (1, (int) std::floor (hz * std::pow (2.0, -1.0 / 48.0) / binWidth));
++        const auto to = std::min (numBins - 1, std::max (from, (int) std::ceil (hz * std::pow (2.0, 1.0 / 48.0) / binWidth)));
++        double most = 0.0;
++        for (int k = from; k <= to; ++k)
++            most = std::max (most, binCut[(size_t) channel][(size_t) k]);
++        return most;
++    }
+ }
+diff --git a/source/dsp/dominion/Dominion.h b/source/dsp/dominion/Dominion.h
+index c43cdcd..291f0e8 100644
+--- a/source/dsp/dominion/Dominion.h
++++ b/source/dsp/dominion/Dominion.h
+@@ -83,13 +83,26 @@ namespace dominion
+         double hardCurve = 0.463, hardFlat = 1.0, hardKnee = 36.3;   // ... and how gently it starts (dB)
+         // Listening: each part's level is smoothed over this many cycles (4 ms to 120 ms).
+         double cycles = 16.0;
+-        // LOOK-AHEAD: how far ahead (ms) the cut sees; the rest of the delay is just delay.
++        // (0.25.0's filter-based LOOK-AHEAD: how far ahead the cut saw, ms. Unused since 0.26.0, kept for the harness.)
+         double leadMs = 15.5;
++        // Fine detail (fineTuning() only): each FFT bin's level smoothed over levelMs, and the
++        // nearest nearOct (octaves either side) left out of SOFT's neighbourhood.
++        double levelMs = 10.0, nearOct = 0.03;
++        // ... the FFT's size at 44.1/48 kHz (1024 or 2048; doubled per doubling of the rate), and each bin's level
++        // averaged with this many bins either side before it's judged (single bins of noise wobble a lot).
++        double frameSize = 2048.0, binSmooth = 0.0;
++        // ... and SOFT going easy on what's quiet: from quietStart dB under the loudest 1/6 octave, less and less
++        // cut, none quietRange dB further down (soothe cut a guitar's loud 2-3 kHz more, its quiet 5-6 kHz less).
++        double quietStart = 200.0, quietRange = 20.0;
+ 
+         // For the harness: set a number by name ("weight3" for weight[3]). False if there's none of that name.
+         bool set (const juce::String& name, double value);
+     };
+     Tuning& refinedTuning();   // the one in use (the harness changes it; nothing else does)
++    // REFINED with LOOK-AHEAD (0.26.0) listens in fine detail (an FFT, about 21 Hz a step at
++    // 44.1 kHz), with its own fitted numbers; the same fields, read per FFT bin ("fine.x" in the harness).
++    // There width0/50/100 is how far a cut spreads across frequencies (octaves), and cycles isn't used.
++    Tuning& fineTuning();
+ 
+     // REFINED's look-ahead delay, in samples (as soothe 3's normal quality: 2304 up to 48 kHz, doubled per doubling).
+     int lookaheadSamples (double sampleRate) noexcept;
+@@ -175,11 +188,22 @@ namespace dominion
+         void updateShape (const Settings&);      // detail and tilts: cut widths, overlaps, timing
+         void updateCurve (const Settings&);      // the depth curve at each filter
+         void computeTargets (const Settings&, int numChannels, double seconds) noexcept;
+-        // The work on a block: listen to `listen` (or the block itself), cut the block.
+-        void cutBlock (juce::dsp::AudioBlock<float> wet, const juce::AudioBuffer<float>* listen, const Settings&, bool delayed) noexcept;
++        // The work on a block (CLASSIC, and REFINED without LOOK-AHEAD): listen to it and cut it.
++        void cutBlock (juce::dsp::AudioBlock<float> wet, const Settings&) noexcept;
+         void blend (juce::dsp::AudioBlock<float> wet, const Settings&) noexcept;   // WET TRIM, MIX, DELTA, OUT (dry in `dry`)
+         void processDelayed (juce::dsp::AudioBlock<float>, const Settings&) noexcept;   // REFINED with LOOK-AHEAD
+ 
++        // REFINED with LOOK-AHEAD, in fine detail (0.26.0): the input through an FFT every `hop`
++        // samples (sqrt-Hann windows, 8 to a frame), each bin cut on its own, out again `latency`
++        // samples late (the frame, plus `latency - fftSize` of plain delay).
++        void prepareFine();
++        void resetFine() noexcept;
++        void updateFineShape (const Settings&);
++        void updateFineCurve();
++        void fineProcess (const juce::AudioBuffer<float>& in, juce::dsp::AudioBlock<float> out, const Settings&) noexcept;
++        void fineFrame (const Settings&, int numChannels) noexcept;
++        double fineCutNear (int channel, double hz) const noexcept;
++
+         static constexpr int subBlock = 32;
+         double sampleRate = 48000.0;
+         int numFilters = 0;
+@@ -227,19 +251,26 @@ namespace dominion
+         std::array<std::array<std::array<double, 2>, eq::maxSections>, 2> listenStates {};
+         int listening = -1;
+ 
+-        // REFINED's look-ahead: the input kept `latency` samples (`ahead`), the
+-        // bells' gains kept for the sub-blocks between hearing and cutting
+-        // (`queued`), the input as it came (`input`), and fading in and out
+-        // (it comes in once its delay has filled).
+-        int latency = 0, lagBlocks = 0, queueAt = 0, warm = 0;
++        // REFINED's look-ahead: the input kept `latency` samples (`ahead`, the
++        // dry for MIX and DELTA), the input as it came (`input`), and fading
++        // in and out (it comes in once its delay has filled).
++        int latency = 0, warm = 0;
+         bool primed = false, wasDelayed = false;
+-        juce::AudioBuffer<float> ahead, input, heard;
++        juce::AudioBuffer<float> ahead, input;
+         int aheadAt = 0;
+-        std::vector<std::array<std::array<double, maxFilters>, 2>> queued;
+-        std::array<std::array<double, maxFilters>, 2> applied {};
+         juce::SmoothedValue<float> delayedFade;
+         Engine engineFor = Engine::classic;
+ 
++        int fftOrder = 11, fftSize = 2048, hop = 256, numBins = 1025, inAt = 0, sinceHop = 0;
++        std::unique_ptr<juce::dsp::FFT> fft;
++        std::vector<float> fftWindow, fftWork;
++        std::array<std::vector<float>, 2> fftIn, fftOut, spectrum;   // the input ring, the output (overlap-add) ring, a frame's spectrum
++        long long outAt = 0;
++        std::vector<double> binHz, binWeight, binMargin, binScale, binAttack, binRelease, binSpread, prefix, scratch;
++        std::vector<int> binFrom, binTo, binNearFrom, binNearTo, binBandFrom, binBandTo;
++        std::array<std::vector<double>, 2> binCurve, binLevel, binCut, binTarget;
++        std::vector<double> bandPrefix, binQuiet;
++
+         std::array<std::array<std::atomic<float>, maxFilters>, 2> shown {};
+     };
+ }
+diff --git a/tests/DominionTests.cpp b/tests/DominionTests.cpp
+index 6b86ab7..ff2d059 100644
+--- a/tests/DominionTests.cpp
++++ b/tests/DominionTests.cpp
+@@ -757,6 +757,55 @@ TEST_CASE ("DOMINION REFINED: more DETAIL, deeper and more selective; less, shal
+     CHECK (narrow < broad - 2.0);
+ }
+ 
++TEST_CASE ("DOMINION REFINED with LOOK-AHEAD hears single harmonics: it cuts them more than the gaps between them", "[dominion][refined]")
++{
++    // A chord-like sound: pink noise and the harmonics of 196 Hz from 2 to 5 kHz,
++    // each 12 dB over the noise around it. soothe 3 cuts a guitar chord's single
++    // harmonics (its cut ripples with them); a bank of 1/6-octave filters can't
++    // tell them apart (at 3 kHz they're 1/16 octave apart), the fine detail can.
++    const auto play = [] (bool lookahead, double hz)
++    {
++        Pink pink (5);
++        std::vector<float> in;
++        const auto source = [&] (int n)
++        {
++            while ((int) in.size() <= n)
++            {
++                const auto i = (int) in.size();
++                double x = pink();
++                for (int h = 11; h <= 25; ++h)
++                    x += 0.004 * std::sin (2.0 * pi * 196.0 * h * i / sampleRate + h);
++                in.push_back ((float) x);
++            }
++            return in[(size_t) n];
++        };
++        DominionRig rig;
++        rig.settings = refined();
++        rig.settings.lookahead = lookahead;
++        rig.settings.depth = 7.5;
++        rig.settings.on = true;
++        const auto out = rig.play (6.0, source, source);
++        const auto late = (size_t) rig.processor.getLatencySamples (rig.settings);
++        std::vector<float> aligned (out[0].begin() + (long) late, out[0].end());
++        std::vector<float> input (in.begin(), in.begin() + (long) aligned.size());
++        return toneDb (aligned, hz) - toneDb (input, hz);
++    };
++    for (const auto lookahead : { true, false })
++    {
++        double onHarmonics = 0.0, between = 0.0;
++        for (int h = 14; h <= 18; ++h)
++        {
++            onHarmonics += play (lookahead, 196.0 * h) / 5.0;
++            between += play (lookahead, 196.0 * (h + 0.5)) / 5.0;
++        }
++        WARN ((lookahead ? "Fine detail" : "Filter bank") << ": on the harmonics " << onHarmonics << " dB, between them " << between << " dB");
++        if (lookahead)
++            CHECK (onHarmonics < between - 1.0);
++        else
++            CHECK (std::abs (onHarmonics - between) < 1.0);
++    }
++}
++
+ TEST_CASE ("DOMINION REFINED in PR7-X: the plugin reports its delay to the DAW while it's on", "[dominion][refined][plugin]")
+ {
+     ParagonX1AudioProcessor processor;
+@@ -796,8 +845,13 @@ TEST_CASE ("DOMINION fitting harness", "[.][domfit]")
+     REQUIRE (jobsPath.isNotEmpty());
+     for (const auto& pair : juce::StringArray::fromTokens (juce::SystemStats::getEnvironmentVariable ("PARAGON_DOMFIT_TUNING", {}), ",", {}))
+         if (pair.contains ("="))
+-            REQUIRE (dominion::refinedTuning().set (pair.upToFirstOccurrenceOf ("=", false, false).trim(),
+-                                                    pair.fromFirstOccurrenceOf ("=", false, false).getDoubleValue()));
++        {
++            auto name = pair.upToFirstOccurrenceOf ("=", false, false).trim();
++            const auto fine = name.startsWith ("fine.");
++            if (fine)
++                name = name.substring (5);
++            REQUIRE ((fine ? dominion::fineTuning() : dominion::refinedTuning()).set (name, pair.fromFirstOccurrenceOf ("=", false, false).getDoubleValue()));
++        }
+ 
+     juce::AudioFormatManager formats;
+     formats.registerBasicFormats();
+diff --git a/tools/soothe-match/fit/fit.py b/tools/soothe-match/fit/fit.py
+index f5767f4..293d541 100644
+--- a/tools/soothe-match/fit/fit.py
++++ b/tools/soothe-match/fit/fit.py
+@@ -28,6 +28,29 @@ STAGES = {
+                          "window0": (0.3, 3), "window100": (0.15, 2), "cycles": (4, 60), "knee": (0.5, 20),
+                          "width50": (0.05, 1.5), **{f"weight{i}": (0, 3) for i in range(3, 10)}},
+                  cases=["R01", "R27", "R03", "R04", "R05", "R06", "R07", "R17", "R18"], keep=STATIC, real=True),
++  # REFINED with LOOK-AHEAD in fine detail (0.26.0): the "fine." numbers, on the look-ahead renders and the guitars.
++  "fine-static": dict(params={f"fine.{n}": r for n, r in {"depthScale": (0.05, 10), "overPower": (0.2, 1.5), "marginDepth": (-1, 4),
++                         "margin0": (-6, 15), "margin100": (-6, 20), "knee": (0.5, 20), "window0": (0.2, 3), "window100": (0.1, 2),
++                         "width0": (0.01, 2), "width50": (0.005, 1.5), "width100": (0.002, 0.8), "nearOct": (0.005, 0.3), "levelMs": (0.5, 80),
++                         "detailScale0": (0.05, 3), "detailScale100": (0.3, 40), **{f"weight{i}": (0, 3) for i in range(3, 10)}}.items()},
++                 cases=["R01", "R27", "R03", "R04", "R05", "R06", "R07", "R17", "R18"], keep=STATIC, real=True),
++  "fine-timing": dict(params={f"fine.{n}": r for n, r in {"attack0": (1, 200), "attack25": (2, 300), "attack50": (5, 400), "attack100": (20, 3000),
++                         "release0": (2, 200), "release50": (5, 600), "release100": (30, 4000), "hardAttack": (0.3, 5), "hardRelease": (0.2, 5),
++                         "detailAttack0": (0.1, 2), "detailAttack100": (0.5, 6), "detailRelease0": (0.2, 5), "detailRelease100": (0.1, 3)}.items()},
++                 cases=["R01", "R08", "R09", "R10", "R11", "R19", "R20", "R06", "R07", "R17", "R18"], keep=lambda k: k in TIMING),
++  "fine-hard": dict(params={f"fine.{n}": r for n, r in {"hard5": (-40, 90), "hardStep": (0, 40), "hardCurve": (0, 4), "hardSlope": (0.02, 2),
++                         "hardFlat": (0, 1), "hardTilt": (-3, 16), "hardKnee": (1, 80)}.items()},
++                 cases=["R12", "R13", "R21", "R22"], keep=STATIC),
++  # The fine numbers' cuts and timing together, with the guitars (0.26.0).
++  "fine-all": dict(params={f"fine.{n}": r for n, r in {"depthScale": (0.05, 10), "overPower": (0.2, 1.5), "marginDepth": (-1, 4),
++                         "margin0": (-6, 15), "margin100": (-6, 20), "knee": (0.5, 20), "levelMs": (0.5, 120), "width0": (0.01, 2),
++                         "width50": (0.005, 1.5), "detailScale0": (0.05, 3), "detailScale100": (0.3, 40),
++                         "attack0": (1, 200), "attack25": (2, 300), "attack50": (5, 400), "release0": (1, 200), "release50": (2, 600),
++                         "release100": (20, 4000), "detailAttack0": (0.1, 3), "detailRelease0": (0.1, 5), "detailRelease100": (0.1, 3),
++                         "weight6": (0, 3), "weight7": (0, 3), "weight8": (0, 3), "quietStart": (0, 40), "quietRange": (2, 60),
++                         "binSmooth": (0, 3.4), "nearOct": (0.005, 0.3)}.items()},
++                 cases=["R01", "R27", "R03", "R04", "R05", "R06", "R07", "R17", "R18", "R08", "R10", "R11", "R19", "R20"],
++                 keep=lambda k: True, real=True),
+   "all": dict(params=None, cases=[c for c in F.CASES if c != "R23"], keep=lambda k: True),
+ }
+ 
+@@ -36,8 +59,8 @@ def run(stage, iters):
+     defaults = dict(depthStart=2.2, depthPower=1.3, depthScale=1.0, margin0=3, margin100=1, knee=4, width0=1.2, width50=0.4, width100=0.1,
+                     window0=1.0, window100=0.33, attack0=2, attack50=10, attack100=30, release0=10, release50=40, release100=300,
+                     detailAttack0=0.5, detailAttack100=2, detailRelease0=1.6, detailRelease100=0.6, hard5=-38, hardStep=3, hardSlope=0.3, hardTilt=1.5,
+-                    leadMs=15, cycles=16, marginDepth=0, overPower=1, hardCurve=0, hardFlat=0, hardKnee=4, hardAttack=1, hardRelease=1, detailScale0=1, detailScale100=1, attack25=5, **{f"weight{i}": w for i, w in enumerate([0, 0, 0, .05, .15, .3, .6, 1, .8, .5])})
+-    x0 = np.array([tuning.get(n, defaults[n]) for n in names])
++                    leadMs=15, cycles=16, levelMs=10, nearOct=0.03, quietStart=200, quietRange=20, binSmooth=0, frameSize=2048, marginDepth=0, overPower=1, hardCurve=0, hardFlat=0, hardKnee=4, hardAttack=1, hardRelease=1, detailScale0=1, detailScale100=1, attack25=5, **{f"weight{i}": w for i, w in enumerate([0, 0, 0, .05, .15, .3, .6, 1, .8, .5])})
++    x0 = np.array([tuning.get(n, defaults[n.split(".")[-1]]) for n in names])
+     # Work in 0..1 (log for positive ranges) so every number moves alike.
+     logs = (lo > 0)
+     to01 = lambda x: np.where(logs, (np.log(x) - np.log(np.where(logs, lo, 1))) / (np.log(np.where(logs, hi, 2)) - np.log(np.where(logs, lo, 1))), (x - lo) / (hi - lo))
+@@ -59,7 +82,7 @@ def run(stage, iters):
+         # Out of range costs (clipped above).
+         return total + 1000 * float(np.sum(np.clip(-u, 0, None) + np.clip(u - 1, 0, None)))
+     u0 = np.clip(to01(x0), 0.001, 0.999)
+-    minimize(f, u0, method="Powell", options=dict(maxfev=iters, xtol=0.01, ftol=0.002))
++    minimize(f, u0, method="Powell", options=dict(maxfev=iters, xtol=0.01, ftol=0.002, direc=np.eye(len(u0)) * 0.12))
+     print("best", best[0])
+ 
+ if __name__ == "__main__":
