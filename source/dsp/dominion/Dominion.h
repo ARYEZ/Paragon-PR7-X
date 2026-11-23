@@ -41,6 +41,59 @@ namespace dominion
     inline const juce::StringArray shapeNames { "Low Cut", "Low Shelf", "High Shelf", "High Cut", "Bell",
                                                 "Band Pass", "Band Reject", "Tilt" };
 
+    // The ENGINE (0.25.0): CLASSIC is DOMINION as it was (0.10.0); REFINED is
+    // fitted to measurements of soothe 3 (renders of our test signal through
+    // it at 28 settings, tools/soothe-match): its knobs read as soothe's do
+    // (DEPTH 0 to 10 as soothe's, beyond it further; DETAIL, ATTACK and
+    // RELEASE 0 to 100 % as soothe's 0 to 10), its own sense of where to work
+    // (much less in the lows), its timing, and a LOOK-AHEAD. Saved by index:
+    // only ever add to the end.
+    enum class Engine { classic, refined };
+    inline const juce::StringArray engineNames { "Classic", "Refined" };
+
+    // REFINED's numbers, the ones fitted to the measurements. A struct (not
+    // constants) so the fitting harness (tests, "[domfit]") can try others.
+    struct Tuning
+    {
+        // DEPTH: the cut grows as ((depth - depthStart) / (5 - depthStart))^depthPower, x depthScale at 5.
+        double depthStart = 2.24, depthPower = 1.29, depthScale = 0.631;
+        // SOFT: a part has to stick out by margin dB (DETAIL 0 to 100) before it's cut.
+        double margin0 = -0.143, margin100 = 4.03, knee = 1.17;
+        // DEPTH lowers that margin (dB per step above 5, raises it below), and DETAIL scales the cut (x at 0 and 100, 1 at 50).
+        double marginDepth = 0.913, detailScale0 = 0.297, detailScale100 = 7.18;
+        // How the cut grows with how far a part sticks out (dB over the margin, to this power: under 1, big peaks less, small ones more).
+        double overPower = 0.581;
+        // How wide a cut is (octaves to half its depth) and how far round a part SOFT looks (octaves either side).
+        double width0 = 1.76, width50 = 0.539, width100 = 0.105;
+        double window0 = 1.0, window100 = 0.33;
+        // SOFT's sense of where to work (fitted: soothe hardly cuts below 500 Hz): a weight on the cut at 25 Hz, 50 Hz ... 12.8 kHz (an octave apart), in between on a log scale.
+        std::array<double, 10> weight { 0.0, 0.0, 0.0, 0.11, 0.0467, 0.3, 0.6, 1.0, 0.8, 0.5 };
+        // Timing at 1 kHz: ATTACK at 0, 25, 50 and 100 %, RELEASE at 0, 50 and 100 % (ms), and how they scale with frequency.
+        double attack0 = 30.7, attack25 = 46.2, attack50 = 107.0, attack100 = 600.0;
+        double release0 = 37.0, release50 = 96.7, release100 = 797.0;
+        double timingPower = 0.5;
+        // HARD's attack and release against SOFT's (soothe's HARD grabs slower and lets go sooner).
+        double hardAttack = 2.71, hardRelease = 0.396;
+        // DETAIL slows the attack and quickens the release: factors at DETAIL 0 and 100 (1 at 50).
+        double detailAttack0 = 0.477, detailAttack100 = 4.2, detailRelease0 = 1.35, detailRelease100 = 0.65;
+        // HARD: the level (dB per part, tilted up hardTilt dB an octave) where it starts at DEPTH 5, how much lower per step, its slope.
+        double hard5 = -22.8, hardStep = 5.02, hardSlope = 0.325, hardTilt = 6.14;
+        // ... how much faster that falls the further DEPTH is from 5 (dB per step squared), and how evenly HARD works
+        // across the spectrum (0: where SOFT does, 1: everywhere alike).
+        double hardCurve = 0.463, hardFlat = 1.0, hardKnee = 36.3;   // ... and how gently it starts (dB)
+        // Listening: each part's level is smoothed over this many cycles (4 ms to 120 ms).
+        double cycles = 16.0;
+        // LOOK-AHEAD: how far ahead (ms) the cut sees; the rest of the delay is just delay.
+        double leadMs = 15.5;
+
+        // For the harness: set a number by name ("weight3" for weight[3]). False if there's none of that name.
+        bool set (const juce::String& name, double value);
+    };
+    Tuning& refinedTuning();   // the one in use (the harness changes it; nothing else does)
+
+    // REFINED's look-ahead delay, in samples (as soothe 3's normal quality: 2304 up to 48 kHz, doubled per doubling).
+    int lookaheadSamples (double sampleRate) noexcept;
+
     inline constexpr int maxBands = 8;
     inline constexpr double maxDepthDb = 18.0;   // a depth-curve band's range
     inline constexpr double maxCutLimitDb = 40.0;   // MAX CUT at the top: no limit
@@ -61,6 +114,8 @@ namespace dominion
     struct Settings
     {
         bool on = false;
+        Engine engine = Engine::classic;
+        bool lookahead = true;     // REFINED only
         Mode mode = Mode::soft;
         double depth = 5.0;        // 0 to 20
         double detail = 50.0;      // 0 to 100: broad build-ups to narrow resonances
@@ -92,6 +147,12 @@ namespace dominion
         void reset() noexcept;
         void process (juce::dsp::AudioBlock<float>, const Settings&) noexcept;
 
+        // How late the sound comes out: REFINED's look-ahead, while on.
+        int getLatencySamples (const Settings& s) const noexcept
+        {
+            return s.on && s.engine == Engine::refined && s.lookahead ? lookaheadSamples (sampleRate) : 0;
+        }
+
         // For the display (any thread): the filters' frequencies and how far
         // each is cutting now, per channel (left/mid, right/side), in dB (0 or more).
         int getNumFilters() const noexcept { return numFilters; }
@@ -114,6 +175,10 @@ namespace dominion
         void updateShape (const Settings&);      // detail and tilts: cut widths, overlaps, timing
         void updateCurve (const Settings&);      // the depth curve at each filter
         void computeTargets (const Settings&, int numChannels, double seconds) noexcept;
+        // The work on a block: listen to `listen` (or the block itself), cut the block.
+        void cutBlock (juce::dsp::AudioBlock<float> wet, const juce::AudioBuffer<float>* listen, const Settings&, bool delayed) noexcept;
+        void blend (juce::dsp::AudioBlock<float> wet, const Settings&) noexcept;   // WET TRIM, MIX, DELTA, OUT (dry in `dry`)
+        void processDelayed (juce::dsp::AudioBlock<float>, const Settings&) noexcept;   // REFINED with LOOK-AHEAD
 
         static constexpr int subBlock = 32;
         double sampleRate = 48000.0;
@@ -135,6 +200,7 @@ namespace dominion
         std::array<double, maxFilters> attackStep {}, releaseStep {};
         double smoothedFor = -1.0;
         std::array<int, maxFilters> windowHalf {};   // SOFT's neighbourhood, in filters either side
+        std::array<double, maxFilters> marginDb {}, weight {}, detailScale {};   // REFINED: SOFT's margin, and where it works
         // The bells' overlap: how much of bell j's cut lands on filter k (k within reach of j).
         std::array<std::array<float, 2 * 48 + 1>, maxFilters> overlap {};
         int reach = 0;
@@ -160,6 +226,19 @@ namespace dominion
         eq::Design listenDesign;
         std::array<std::array<std::array<double, 2>, eq::maxSections>, 2> listenStates {};
         int listening = -1;
+
+        // REFINED's look-ahead: the input kept `latency` samples (`ahead`), the
+        // bells' gains kept for the sub-blocks between hearing and cutting
+        // (`queued`), the input as it came (`input`), and fading in and out
+        // (it comes in once its delay has filled).
+        int latency = 0, lagBlocks = 0, queueAt = 0, warm = 0;
+        bool primed = false, wasDelayed = false;
+        juce::AudioBuffer<float> ahead, input, heard;
+        int aheadAt = 0;
+        std::vector<std::array<std::array<double, maxFilters>, 2>> queued;
+        std::array<std::array<double, maxFilters>, 2> applied {};
+        juce::SmoothedValue<float> delayedFade;
+        Engine engineFor = Engine::classic;
 
         std::array<std::array<std::atomic<float>, maxFilters>, 2> shown {};
     };

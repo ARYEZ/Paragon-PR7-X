@@ -109,9 +109,9 @@ private:
     ParagonX1AudioProcessor& processor;
     DominionDisplay display;
 
-    juce::ToggleButton onButton { "ON" }, delta { "DELTA" };
-    juce::AudioProcessorValueTreeState::ButtonAttachment onAttachment, deltaAttachment;
-    Choice mode, stereo;
+    juce::ToggleButton onButton { "ON" }, delta { "DELTA" }, lookahead { "LOOK-AHEAD" };
+    juce::AudioProcessorValueTreeState::ButtonAttachment onAttachment, deltaAttachment, lookaheadAttachment;
+    Choice mode, engine, stereo;
     Knob depth, detail, attack, release, link, focus, detailLow, detailHigh, attackLow, attackHigh, releaseLow, releaseHigh,
          maxCut, wetTrim, mix, out;
     juce::TextButton back { "BACK TO PEDAL" };

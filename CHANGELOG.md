@@ -2,6 +2,37 @@
 
 Each version's notes appear on its GitHub Release page.
 
+## 0.25.0
+
+- **DOMINION has a second engine, REFINED, fitted to soothe 3 from your 28 renders,** as you asked: "as perfectly as possible", added as a new mode, with look-ahead.
+  - **How it was matched:** you put our test signal through soothe 3 at 28 settings. I measured each render (how deep and how wide it cuts, where, how fast, at which levels, and in stereo), rendered DOMINION the same way, and had the computer adjust REFINED's numbers until the two measured alike. Across the 27 comparable renders the cuts now agree within about **0.5 to 1 dB on average** (HARD at full depth within about 2 dB). It's still our own design that behaves like soothe, not soothe's code: that isn't published.
+  - **What changed against CLASSIC,** at the defaults (soothe 3 / REFINED / CLASSIC):
+
+    | | soothe 3 | REFINED | CLASSIC |
+    |---|---|---|---|
+    | Narrow resonance at 3.5 kHz | -3.1 dB | -2.5 dB | -7.7 dB |
+    | Resonance at 150 Hz | none | none | -2.4 dB |
+    | Snare ring at 220 Hz | -0.3 dB | -0.1 dB | -6.5 dB |
+    | Reacts in | 57 ms | 63 ms | 11 ms |
+    | Lets go in | 36 ms | 31 ms | 28 ms |
+
+    REFINED is much gentler, leaves the lows and low mids alone the way soothe does, and is slower to grab, so the start of each note comes through.
+  - **The knobs read like soothe's:** DEPTH as soothe's (5 is soothe's 5; up to 10 as soothe, beyond it further), and DETAIL, ATTACK and RELEASE at 10% per soothe step (50% is soothe's 5.0). Measured examples: DEPTH 2.5 does next to nothing and 10 cuts about 12 dB, as soothe; high DETAIL cuts only the strongest resonance, deeper; low DETAIL cuts shallow and broad; HARD depends on the level and gets heavy fast at high DEPTH.
+  - **LOOK-AHEAD** (on by default): like soothe's normal quality, REFINED hears about 15 ms ahead and the sound comes out 52 ms late (2,304 samples, the same as soothe), which PR7-X tells your DAW so it lines everything up. Switch it off for no delay, like soothe's low-latency mode.
+  - **New preset "Refined Default":** soothe 3's own starting point (RELEASE 30%, L/R, and its curve: a 100 Hz low cut, +2.5 at 4 kHz, a 16 kHz high cut).
+  - **CLASSIC is untouched:** every saved project, rig and preset opens in CLASSIC and sounds exactly as before. Compared sample by sample, not one sample differs.
+  - **Where it's on the page:** ENGINE (CLASSIC / REFINED) and LOOK-AHEAD sit beside MODE on DOMINION's page; its rack unit's screen says REFINED.
+- **What I couldn't check:** the sound by ear, and soothe at sample rates other than 44.1 kHz. A few small differences remain: at the very top (8 kHz and up) REFINED's cuts are a little wider, and at full DEPTH it cuts the strongest peak about 1.5 dB more and plain noise a little less. The knob ranges assume soothe's knobs run 0 to 10. If you send me the numbers soothe showed at each end, I can check them.
+- **Also in this release:** 0.24.1 (AURORA 10% less bright), so nothing is lost.
+
+## 0.24.1
+
+- **AURORA is 10% less bright**, the same change you chose for PR7-B (0.24.3). Full pearl white was too much to look at for long. Now the pearl is drawn at 90% of its old brightness: still clearly a white pearl unit, without the glare. Pure white becomes 230 out of 255.
+  - All of the pearl: the rim, the face and the six panels the rack units sit on, shine and highlights included.
+  - The lettering, the printed red, the badge, the neon rings, the keys, the knobs and the screens keep their own colours, so they stand out a little more against the softer pearl.
+  - **OBSIDIAN is unchanged:** compared pixel by pixel with 0.24.0, not one pixel differs.
+  - Nothing in the sound changes.
+
 ## 0.24.0
 
 - **Two finishes now, with your names:**

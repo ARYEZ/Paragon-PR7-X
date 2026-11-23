@@ -6,3 +6,6 @@ cmake-build-*/
 .vs/
 *.user
 .DS_Store
+tools/soothe-match/fit/tuning.json
+tools/soothe-match/fit/__pycache__/
+tools/soothe-match/fit/w_*/
