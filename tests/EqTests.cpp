@@ -1406,3 +1406,93 @@ TEST_CASE ("Master rigs: the full chain (0.22.1) is as loud as the master was be
         CHECK_THAT (results[1] - results[0], WithinAbs (0.0, 0.5));
     }
 }
+
+//==============================================================================
+// Hidden (run with "[eqfit]"): renders a WAV through ECHELON for each line of
+// a jobs file, to compare with FabFilter Pro-Q 4's renders of the same test
+// signal (tools/fabfilter-match):
+//   PARAGON_EQFIT_IN=test.wav PARAGON_EQFIT_JOBS=jobs.txt
+// each line "out.wav key=value ..." for one band: shape (bell, lowshelf,
+// lowcut, highshelf, highcut, notch, bandpass, tiltshelf, flattilt, allpass),
+// freq, gain, q, slope (dB/oct), place (stereo, left, right, mid, side), dyn
+// (dynamic range, dB), thresh, auto (0/1), attack, release (0 to 1). A line
+// with no shape is no band at all. Written as 32-bit float.
+TEST_CASE ("ECHELON fitting harness", "[.][eqfit]")
+{
+    const auto inPath = juce::SystemStats::getEnvironmentVariable ("PARAGON_EQFIT_IN", {});
+    const auto jobsPath = juce::SystemStats::getEnvironmentVariable ("PARAGON_EQFIT_JOBS", {});
+    REQUIRE (inPath.isNotEmpty());
+    REQUIRE (jobsPath.isNotEmpty());
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (juce::File (inPath)));
+    REQUIRE (reader != nullptr);
+    const auto rate = reader->sampleRate;
+    const auto length = (int) reader->lengthInSamples;
+    juce::AudioBuffer<float> source (2, length);
+    reader->read (&source, 0, length, 0, true, true);
+
+    juce::StringArray lines;
+    juce::File (jobsPath).readLines (lines);
+    for (const auto& line : lines)
+    {
+        auto words = juce::StringArray::fromTokens (line, " ", {});
+        words.removeEmptyStrings();
+        if (words.isEmpty())
+            continue;
+        eq::ParametricEq::Settings settings;
+        settings.on = true;
+        auto& band = settings.bands[0];
+        for (int i = 1; i < words.size(); ++i)
+        {
+            const auto key = words[i].upToFirstOccurrenceOf ("=", false, false);
+            const auto value = words[i].fromFirstOccurrenceOf ("=", false, false);
+            const auto number = value.getDoubleValue();
+            if (key == "shape")
+            {
+                const juce::StringArray names { "bell", "lowshelf", "lowcut", "highshelf", "highcut", "notch", "bandpass", "tiltshelf", "flattilt", "allpass" };
+                REQUIRE (names.contains (value));
+                band.used = true;
+                band.shape = (eq::Shape) names.indexOf (value);
+            }
+            else if (key == "freq")    band.frequency = number;
+            else if (key == "gain")    band.gainDb = number;
+            else if (key == "q")       band.q = number;
+            else if (key == "slope")
+            {
+                const auto at = std::find (std::begin (eq::slopes), std::end (eq::slopes), (int) number);
+                REQUIRE (at != std::end (eq::slopes));
+                band.slope = (int) (at - std::begin (eq::slopes));
+            }
+            else if (key == "place")
+            {
+                const juce::StringArray names { "stereo", "left", "right", "mid", "side" };
+                REQUIRE (names.contains (value));
+                band.placement = (eq::Placement) names.indexOf (value);
+            }
+            else if (key == "dyn")     band.dynamicRangeDb = number;
+            else if (key == "thresh")  band.thresholdDb = number;
+            else if (key == "auto")    band.autoThreshold = number > 0.5;
+            else if (key == "attack")  band.attack = number;
+            else if (key == "release") band.release = number;
+            else FAIL ("unknown key " << key);
+        }
+
+        eq::ParametricEq eqProcessor;
+        constexpr int blockSize = 512;
+        eqProcessor.prepare (rate, blockSize);
+        juce::AudioBuffer<float> out;
+        out.makeCopyOf (source);
+        for (int start = 0; start < length; start += blockSize)
+        {
+            juce::dsp::AudioBlock<float> block (out);
+            eqProcessor.process (block.getSubBlock ((size_t) start, (size_t) std::min (blockSize, length - start)), settings);
+        }
+        juce::WavAudioFormat format;
+        const juce::File target (words[0]);
+        target.deleteFile();
+        std::unique_ptr<juce::AudioFormatWriter> writer (format.createWriterFor (new juce::FileOutputStream (target), rate, 2, 32, {}, 0));
+        REQUIRE (writer != nullptr);
+        writer->writeFromAudioSampleBuffer (out, 0, length);
+    }
+}
