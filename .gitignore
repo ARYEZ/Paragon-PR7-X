@@ -9,3 +9,4 @@ cmake-build-*/
 tools/soothe-match/fit/tuning.json
 tools/soothe-match/fit/__pycache__/
 tools/soothe-match/fit/w_*/
+__pycache__/
